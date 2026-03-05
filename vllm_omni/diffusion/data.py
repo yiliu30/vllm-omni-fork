@@ -7,7 +7,7 @@ import random
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any
-
+import json
 import torch
 from pydantic import model_validator
 from typing_extensions import Self
@@ -563,7 +563,7 @@ class OmniDiffusionConfig:
                     )
 
                 self.quantization_config = get_diffusion_quant_config(quant_method, **quant_kwargs)
-                self.quantization_config._vllm_config.maybe_update_config(f"{self.model}/transformer/")
+
             elif self.quantization_config is None and self.quantization is not None:
                 self.quantization_config = get_diffusion_quant_config(self.quantization)
             elif not isinstance(self.quantization_config, DiffusionQuantizationConfig):
@@ -571,6 +571,18 @@ class OmniDiffusionConfig:
                     f"quantization_config must be a DiffusionQuantizationConfig, dict, or None, "
                     f"got {type(self.quantization_config)!r}"
                 )
+        else:
+            # Parse the quantization config from the model's transformer config
+            with open(f"{self.model}/transformer/config.json", "r") as f:
+                config_data = json.load(f)
+            quant_config = config_data.get("quantization_config", {})
+            quant_method = quant_config.get("quant_method", None)
+
+            if quant_method is not None:
+                self.quantization = quant_method
+                quant_config.pop("quant_method", None)
+                self.quantization_config = get_diffusion_quant_config(quant_method, **quant_config)
+                self.quantization_config._vllm_config.maybe_update_config(f"{self.model}/transformer/")
 
         if self.max_cpu_loras is None:
             self.max_cpu_loras = 1
