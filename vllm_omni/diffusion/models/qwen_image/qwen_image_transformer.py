@@ -1071,20 +1071,6 @@ class QwenImageTransformer2DModel(CachedTransformer):
         hidden_states = self.norm_out(hidden_states, temb)
         output = self.proj_out(hidden_states)
 
-        # Note: SP gather is handled automatically by _sp_plan's SequenceParallelGatherHook
-        # on proj_out output. No manual all_gather needed here.
-
-        # # Handle case where proj_out might return a tuple (can happen with GPTQ)
-        # if isinstance(output, (tuple, list)):
-        #     output = output[0]
-
-        # # Ensure output tensor is in the correct dtype for scheduler compatibility
-        # # This is particularly important for GPTQ quantized models
-        # if output.dtype not in [torch.float16, torch.bfloat16, torch.float32]:
-        #     output = output.to(torch.float32)
-
-        # if not return_dict:
-        #     return (output,)
 
         return Transformer2DModelOutput(sample=output)
 
