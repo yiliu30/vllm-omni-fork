@@ -940,14 +940,7 @@ class QwenImageTransformer2DModel(CachedTransformer):
         )
 
         self.norm_out = AdaLayerNormContinuous(self.inner_dim, self.inner_dim, elementwise_affine=False, eps=1e-6)
-        self.proj_out = ColumnParallelLinear(
-            self.inner_dim,
-            patch_size * patch_size * self.out_channels,
-            bias=True,
-            gather_output=True,
-            quant_config=quant_config,
-            prefix=f"proj_out"
-        )
+        self.proj_out = nn.Linear(self.inner_dim, patch_size * patch_size * self.out_channels, bias=True)
 
         self.gradient_checkpointing = False
         self.zero_cond_t = zero_cond_t
@@ -1081,17 +1074,17 @@ class QwenImageTransformer2DModel(CachedTransformer):
         # Note: SP gather is handled automatically by _sp_plan's SequenceParallelGatherHook
         # on proj_out output. No manual all_gather needed here.
 
-        # Handle case where proj_out might return a tuple (can happen with GPTQ)
-        if isinstance(output, (tuple, list)):
-            output = output[0]
+        # # Handle case where proj_out might return a tuple (can happen with GPTQ)
+        # if isinstance(output, (tuple, list)):
+        #     output = output[0]
 
-        # Ensure output tensor is in the correct dtype for scheduler compatibility
-        # This is particularly important for GPTQ quantized models
-        if output.dtype not in [torch.float16, torch.bfloat16, torch.float32]:
-            output = output.to(torch.float32)
+        # # Ensure output tensor is in the correct dtype for scheduler compatibility
+        # # This is particularly important for GPTQ quantized models
+        # if output.dtype not in [torch.float16, torch.bfloat16, torch.float32]:
+        #     output = output.to(torch.float32)
 
-        if not return_dict:
-            return (output,)
+        # if not return_dict:
+        #     return (output,)
 
         return Transformer2DModelOutput(sample=output)
 
