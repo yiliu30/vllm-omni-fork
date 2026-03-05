@@ -445,7 +445,7 @@ class FeedForward(nn.Module):
 
         layers: list[nn.Module] = [
             ColumnParallelApproxGELU(
-                dim, inner_dim, approximate="tanh", bias=bias, quant_config=quant_config, prefix=prefix
+                dim, inner_dim, approximate="tanh", bias=bias, quant_config=quant_config, prefix=f"{prefix}.net.0"
             ),
             nn.Identity(),  # placeholder for weight loading
             RowParallelLinear(
@@ -454,7 +454,7 @@ class FeedForward(nn.Module):
                 input_is_parallel=True,
                 return_bias=False,
                 quant_config=quant_config,
-                prefix=prefix,
+                prefix=f"{prefix}.net.2",
             ),
         ]
 
@@ -707,7 +707,7 @@ class QwenImageTransformerBlock(nn.Module):
         self.txt_norm1 = AdaLayerNorm(dim, elementwise_affine=False, eps=eps)
         # Text doesn't need separate attention - it's handled by img_attn joint computation
         self.txt_norm2 = AdaLayerNorm(dim, elementwise_affine=False, eps=eps)
-        self.txt_mlp = FeedForward(dim=dim, dim_out=dim, quant_config=quant_config, prefix="txt_mlp")
+        self.txt_mlp = FeedForward(dim=dim, dim_out=dim, quant_config=quant_config, prefix=f"{prefix}.txt_mlp")
 
         self.zero_cond_t = zero_cond_t
 
