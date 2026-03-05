@@ -36,14 +36,15 @@ class DiffusionGPTQMarlinConfig(DiffusionQuantizationConfig):
 
     def __init__(
         self,
-        weight_bits: int = 4,
+        bits: int = 4,
         group_size: int = 128,
         desc_act: bool = False,
         lm_head_quantized: bool = False,
         dynamic: dict[str, dict[str, int | bool]] | None = None,
         ignored_layers: list[str] | None = None,
+        **kwargs,
     ):
-        self.weight_bits = weight_bits
+        self.bits = bits
         self.group_size = group_size
         self.desc_act = desc_act
         self.lm_head_quantized = lm_head_quantized
@@ -51,15 +52,15 @@ class DiffusionGPTQMarlinConfig(DiffusionQuantizationConfig):
         self.ignored_layers = ignored_layers or []
 
         # Validate parameters
-        if weight_bits not in [2, 3, 4, 8]:
-            raise ValueError(f"Unsupported weight_bits: {weight_bits}. Supported: [2, 3, 4, 8]")
+        if bits not in [2, 3, 4, 8]:
+            raise ValueError(f"Unsupported bits: {bits}. Supported: [2, 3, 4, 8]")
 
         if group_size not in [-1, 32, 64, 128, 256, 512, 1024]:
             raise ValueError(f"Unsupported group_size: {group_size}. Supported: [-1, 32, 64, 128, 256, 512, 1024]")
 
         # Create underlying vLLM GPTQ config
         quant_args_marlin = GPTQMarlinConfig(
-            weight_bits=weight_bits,
+            weight_bits=bits,
             group_size=group_size,
             is_sym=True,
             lm_head_quantized=False,
@@ -70,3 +71,4 @@ class DiffusionGPTQMarlinConfig(DiffusionQuantizationConfig):
         self._vllm_config = quant_args_marlin
         # self._vllm_config = GPTQMarlinConfig.from_config(quant_args_marlin)
         self._vllm_config.modules_in_block_to_quantize = None
+    
