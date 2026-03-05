@@ -415,7 +415,7 @@ class ColumnParallelApproxGELU(nn.Module):
             gather_output=False,
             return_bias=False,
             quant_config=quant_config,
-            prefix=prefix,
+            prefix=f"{prefix}.proj"
         )
         self.approximate = approximate
 
@@ -481,6 +481,7 @@ class QwenImageCrossAttention(nn.Module):
         context_pre_only: bool = False,
         out_dim: int | None = None,
         quant_config: QuantizationConfig | None = None,
+        prefix: str = "",
     ) -> None:
         super().__init__()
         assert dim % num_heads == 0
@@ -497,7 +498,7 @@ class QwenImageCrossAttention(nn.Module):
             head_size=self.head_dim,
             total_num_heads=num_heads,
             quant_config=quant_config,
-            prefix="to_qkv",
+            prefix=f"{prefix}.to_qkv"
         )
         self.query_num_heads = self.to_qkv.num_heads
         self.kv_num_heads = self.to_qkv.num_kv_heads
@@ -508,12 +509,13 @@ class QwenImageCrossAttention(nn.Module):
         self.inner_dim = out_dim if out_dim is not None else head_dim * self.total_num_heads
 
         assert context_pre_only is not None
+
         self.add_kv_proj = QKVParallelLinear(
             hidden_size=added_kv_proj_dim,
             head_size=head_dim,
             total_num_heads=num_heads,
             quant_config=quant_config,
-            prefix="add_kv_proj",
+            prefix=f"{prefix}.add_kv_proj"
         )
         self.add_query_num_heads = self.add_kv_proj.num_heads
         self.add_kv_num_heads = self.add_kv_proj.num_kv_heads
@@ -526,7 +528,7 @@ class QwenImageCrossAttention(nn.Module):
             input_is_parallel=True,
             return_bias=False,
             quant_config=quant_config,
-            prefix="to_add_out",
+            prefix=f"{prefix}.to_add_out"
         )
 
         assert not pre_only
@@ -537,7 +539,7 @@ class QwenImageCrossAttention(nn.Module):
             input_is_parallel=True,
             return_bias=False,
             quant_config=quant_config,
-            prefix="to_out",
+            prefix=f"{prefix}.to_out.0",
         )
 
         self.norm_added_q = RMSNorm(head_dim, eps=eps)
@@ -671,6 +673,7 @@ class QwenImageTransformerBlock(nn.Module):
         eps: float = 1e-6,
         zero_cond_t: bool = False,
         quant_config: QuantizationConfig | None = None,
+        prefix: str="",
     ):
         super().__init__()
 
@@ -691,9 +694,10 @@ class QwenImageTransformerBlock(nn.Module):
             context_pre_only=False,
             head_dim=attention_head_dim,
             quant_config=quant_config,
+            prefix=f"{prefix}.attn"
         )
         self.img_norm2 = AdaLayerNorm(dim, elementwise_affine=False, eps=eps)
-        self.img_mlp = FeedForward(dim=dim, dim_out=dim, quant_config=quant_config, prefix="img_mlp")
+        self.img_mlp = FeedForward(dim=dim, dim_out=dim, quant_config=quant_config, prefix=f"{prefix}.img_mlp")
 
         # Text processing modules
         self.txt_mod = nn.Sequential(
@@ -898,6 +902,7 @@ class QwenImageTransformer2DModel(CachedTransformer):
         use_additional_t_cond: bool = False,
         use_layer3d_rope: bool = False,
         quant_config: QuantizationConfig | None = None,
+        prefix: str = ""
     ):
         super().__init__()
         self.parallel_config = od_config.parallel_config
@@ -928,13 +933,21 @@ class QwenImageTransformer2DModel(CachedTransformer):
                     attention_head_dim=attention_head_dim,
                     zero_cond_t=zero_cond_t,
                     quant_config=quant_config,
+                    prefix=f"transformer_blocks.{i}"
                 )
-                for _ in range(num_layers)
+                for i in range(num_layers)
             ]
         )
 
         self.norm_out = AdaLayerNormContinuous(self.inner_dim, self.inner_dim, elementwise_affine=False, eps=1e-6)
-        self.proj_out = nn.Linear(self.inner_dim, patch_size * patch_size * self.out_channels, bias=True)
+        self.proj_out = ColumnParallelLinear(
+            self.inner_dim,
+            patch_size * patch_size * self.out_channels,
+            bias=True,
+            gather_output=True,
+            quant_config=quant_config,
+            prefix=f"proj_out"
+        )
 
         self.gradient_checkpointing = False
         self.zero_cond_t = zero_cond_t
@@ -1067,6 +1080,18 @@ class QwenImageTransformer2DModel(CachedTransformer):
 
         # Note: SP gather is handled automatically by _sp_plan's SequenceParallelGatherHook
         # on proj_out output. No manual all_gather needed here.
+
+        # Handle case where proj_out might return a tuple (can happen with GPTQ)
+        if isinstance(output, (tuple, list)):
+            output = output[0]
+
+        # Ensure output tensor is in the correct dtype for scheduler compatibility
+        # This is particularly important for GPTQ quantized models
+        if output.dtype not in [torch.float16, torch.bfloat16, torch.float32]:
+            output = output.to(torch.float32)
+
+        if not return_dict:
+            return (output,)
 
         return Transformer2DModelOutput(sample=output)
 
