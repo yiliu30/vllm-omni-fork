@@ -132,10 +132,10 @@ def parse_args() -> argparse.Namespace:
         "--quantization",
         type=str,
         default=None,
-        choices=["fp8", "gguf"],
+        choices=["fp8", "gguf", "gptq_marlin"],
         help=(
             "Quantization method for the transformer. "
-            "Options: 'fp8' (FP8 W8A8), 'gguf' (GGUF quantized weights). "
+            "Options: 'fp8' (FP8 W8A8), 'gguf' (GGUF quantized weights), 'gptq_marlin' (gptq_marlin w4a16). "
             "Default: None (no quantization, uses BF16)."
         ),
     )
@@ -144,6 +144,30 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help=("GGUF file path or HF reference for transformer weights. Required when --quantization gguf is set."),
+    )
+    parser.add_argument(
+        "--gptq_marlin-weight-bits",
+        type=int,
+        default=4,
+        choices=[2, 3, 4, 8],
+        help="Number of bits for gptq_marlin weight quantization (default: 4). Only used with --quantization gptq_marlin.",
+    )
+    parser.add_argument(
+        "--gptq_marlin-group-size",
+        type=int,
+        default=128,
+        choices=[-1, 32, 64, 128, 256, 512, 1024],
+        help="Group size for gptq_marlin quantization (default: 128, -1 for per-channel). Only used with --quantization gptq_marlin.",
+    )
+    parser.add_argument(
+        "--gptq_marlin-desc-act",
+        action="store_true",
+        help="Use descending order for gptq_marlin activation quantization. Only used with --quantization gptq_marlin.",
+    )
+    parser.add_argument(
+        "--gptq_marlin-lm-head-quantized",
+        action="store_true",
+        help="Quantize the LM head (output projection) with gptq_marlin. Only used with --quantization gptq_marlin.",
     )
     parser.add_argument(
         "--ignored-layers",
@@ -280,6 +304,17 @@ def main():
             "method": "gguf",
             "gguf_model": args.gguf_model,
         }
+    elif args.quantization == "gptq_marlin":
+        quant_config = {
+            "method": "gptq_marlin",
+            "weight_bits": args.gptq_marlin_weight_bits,
+            "group_size": args.gptq_marlin_group_size,
+            "desc_act": args.gptq_marlin_desc_act,
+            "lm_head_quantized": args.gptq_marlin_lm_head_quantized,
+        }
+        if ignored_layers:
+            quant_config["ignored_layers"] = ignored_layers
+        quant_kwargs["quantization_config"] = quant_config
     elif args.quantization and ignored_layers:
         quant_kwargs["quantization_config"] = {
             "method": args.quantization,
@@ -318,6 +353,11 @@ def main():
     print(f"  Inference steps: {args.num_inference_steps}")
     print(f"  Cache backend: {cache_backend if cache_backend else 'None (no acceleration)'}")
     print(f"  Quantization: {args.quantization if args.quantization else 'None (BF16)'}")
+    if args.quantization == "gptq_marlin":
+        print(f"    - Weight bits: {args.gptq_marlin_weight_bits}")
+        print(f"    - Group size: {args.gptq_marlin_group_size}")
+        print(f"    - Desc act: {args.gptq_marlin_desc_act}")
+        print(f"    - LM head quantized: {args.gptq_marlin_lm_head_quantized}")
     if ignored_layers:
         print(f"  Ignored layers: {ignored_layers}")
     print(
