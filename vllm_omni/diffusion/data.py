@@ -563,6 +563,7 @@ class OmniDiffusionConfig:
                     )
 
                 self.quantization_config = get_diffusion_quant_config(quant_method, **quant_kwargs)
+                self.quantization_config._vllm_config.maybe_update_config(f"{self.model}/transformer/")
             elif self.quantization_config is None and self.quantization is not None:
                 self.quantization_config = get_diffusion_quant_config(self.quantization)
             elif not isinstance(self.quantization_config, DiffusionQuantizationConfig):
