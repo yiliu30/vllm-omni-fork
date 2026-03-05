@@ -143,7 +143,15 @@ class CFGParallelMixin(metaclass=ABCMeta):
         Subclasses should override this if they need custom behavior,
         but the default implementation calls self.transformer.
         """
-        return self.transformer(*args, **kwargs)[0]
+        output = self.transformer(*args, **kwargs)
+
+        # Handle both return_dict=True (default) and return_dict=False cases
+        if hasattr(output, 'sample'):
+            # Transformer2DModelOutput object
+            return output.sample
+        else:
+            # Tuple/tensor output (when return_dict=False)
+            return output[0] if isinstance(output, (tuple, list)) else output
 
     def diffuse(
         self,
