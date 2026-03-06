@@ -375,11 +375,13 @@ class FluxSingleTransformerBlock(nn.Module):
 
         self.norm = AdaLayerNormZeroSingle(dim)
         self.proj_mlp = ReplicatedLinear(
-            dim, self.mlp_hidden_dim, bias=True, return_bias=False, quant_config=quant_config
+            dim, self.mlp_hidden_dim, bias=True, return_bias=False, quant_config=quant_config,
+            prefix=f"{prefix}.proj_mlp"
         )
         self.act_mlp = nn.GELU(approximate="tanh")
         self.proj_out = ReplicatedLinear(
-            dim + self.mlp_hidden_dim, dim, bias=True, return_bias=False, quant_config=quant_config
+            dim + self.mlp_hidden_dim, dim, bias=True, return_bias=False, quant_config=quant_config,
+            prefix=f"{prefix}.proj_out"
         )
 
         self.attn = FluxAttention(
