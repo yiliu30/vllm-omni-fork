@@ -491,6 +491,52 @@ class OmniDiffusionConfig:
             f"Failed to find available port after {max_attempts} attempts (started from port {original_port})"
         )
 
+
+    def resolve_quantization(self):
+        """Resolve quantization config. Can be called after tf_model_config is loaded."""
+        # Try auto-detect from disk config
+        disk_quant_config = self.tf_model_config.get("quantization_config", None)
+        if disk_quant_config is not None and isinstance(disk_quant_config, dict) and "quant_method" in disk_quant_config:
+            self.quantization_config = disk_quant_config
+            quant_method = disk_quant_config.get("quant_method", None)
+            self.quantization = quant_method
+            disk_quant_config.pop("quant_method", None)
+            self.quantization_config = get_diffusion_quant_config(quant_method, **disk_quant_config)
+            # self.quantization_config._vllm_config.maybe_update_config(f"{self.model}/transformer/")
+            logger.info(f"Auto-detected quantization method '{self.quantization}' from model config")
+            return
+
+        # Convert quantization config (deferred import to avoid circular imports)
+        if self.quantization is not None or self.quantization_config is not None:
+            from vllm_omni.diffusion.quantization import (
+                DiffusionQuantizationConfig,
+            )
+
+            # Handle dict or DictConfig (from OmegaConf) - use Mapping for broader compatibility
+            if isinstance(self.quantization_config, Mapping):
+                # Convert DictConfig to dict if needed (OmegaConf compatibility)
+                config_dict = dict(self.quantization_config)
+                # Use get() instead of pop() to avoid mutating original dict
+                quant_method = config_dict.get("method", self.quantization)
+                # Filter out "method" key for kwargs
+                quant_kwargs = {k: v for k, v in config_dict.items() if k != "method"}
+
+                # Validate conflicting methods
+                if self.quantization is not None and quant_method is not None and quant_method != self.quantization:
+                    logger.warning(
+                        f"Conflicting quantization methods: quantization={self.quantization!r}, "
+                        f"quantization_config['method']={quant_method!r}. Using quantization_config['method']."
+                    )
+
+                self.quantization_config = get_diffusion_quant_config(quant_method, **quant_kwargs)
+            elif self.quantization_config is None and self.quantization is not None:
+                self.quantization_config = get_diffusion_quant_config(self.quantization)
+            elif not isinstance(self.quantization_config, DiffusionQuantizationConfig):
+                raise TypeError(
+                    f"quantization_config must be a DiffusionQuantizationConfig, dict, or None, "
+                    f"got {type(self.quantization_config)!r}"
+                )
+
     def __post_init__(self):
         # TODO: remove hard code
         initial_master_port = (self.master_port or 30005) + random.randint(0, 100)
@@ -541,49 +587,6 @@ class OmniDiffusionConfig:
         elif not isinstance(self.cache_config, DiffusionCacheConfig):
             # If it's neither dict nor DiffusionCacheConfig, convert to empty config
             self.cache_config = DiffusionCacheConfig()
-
-        # Convert quantization config (deferred import to avoid circular imports)
-        if self.quantization is not None or self.quantization_config is not None:
-            from vllm_omni.diffusion.quantization import (
-                DiffusionQuantizationConfig,
-            )
-
-            # Handle dict or DictConfig (from OmegaConf) - use Mapping for broader compatibility
-            if isinstance(self.quantization_config, Mapping):
-                # Convert DictConfig to dict if needed (OmegaConf compatibility)
-                config_dict = dict(self.quantization_config)
-                # Use get() instead of pop() to avoid mutating original dict
-                quant_method = config_dict.get("method", self.quantization)
-                # Filter out "method" key for kwargs
-                quant_kwargs = {k: v for k, v in config_dict.items() if k != "method"}
-
-                # Validate conflicting methods
-                if self.quantization is not None and quant_method is not None and quant_method != self.quantization:
-                    logger.warning(
-                        f"Conflicting quantization methods: quantization={self.quantization!r}, "
-                        f"quantization_config['method']={quant_method!r}. Using quantization_config['method']."
-                    )
-
-                self.quantization_config = get_diffusion_quant_config(quant_method, **quant_kwargs)
-            elif self.quantization_config is None and self.quantization is not None:
-                self.quantization_config = get_diffusion_quant_config(self.quantization)
-            elif not isinstance(self.quantization_config, DiffusionQuantizationConfig):
-                raise TypeError(
-                    f"quantization_config must be a DiffusionQuantizationConfig, dict, or None, "
-                    f"got {type(self.quantization_config)!r}"
-                )
-        else:
-            # Parse the quantization config from the model's transformer config
-            with open(f"{self.model}/transformer/config.json", "r") as f:
-                config_data = json.load(f)
-            quant_config = config_data.get("quantization_config", {})
-            quant_method = quant_config.get("quant_method", None)
-
-            if quant_method is not None:
-                self.quantization = quant_method
-                quant_config.pop("quant_method", None)
-                self.quantization_config = get_diffusion_quant_config(quant_method, **quant_config)
-                self.quantization_config._vllm_config.maybe_update_config(f"{self.model}/transformer/")
 
         if self.max_cpu_loras is None:
             self.max_cpu_loras = 1

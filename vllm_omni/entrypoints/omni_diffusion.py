@@ -99,7 +99,7 @@ class OmniDiffusion:
 
         if cfg_kv_collect_func is not None:
             od_config.cfg_kv_collect_func = cfg_kv_collect_func
-
+        od_config.resolve_quantization()
         self.engine: DiffusionEngine = DiffusionEngine.make_engine(od_config)
 
     def generate(
