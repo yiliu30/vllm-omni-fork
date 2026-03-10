@@ -29,7 +29,6 @@ from vllm.logger import init_logger
 from .base import DiffusionQuantizationConfig
 from .fp8 import DiffusionFp8Config
 from .gguf import DiffusionGgufConfig
-from .gptq import DiffusionGPTQMarlinConfig
 from .inc import DiffusionINCConfig
 
 if TYPE_CHECKING:
