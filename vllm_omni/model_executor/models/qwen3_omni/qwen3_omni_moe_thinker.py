@@ -850,6 +850,18 @@ class Qwen3OmniMoeThinkerForConditionalGeneration(
         self.multimodal_config = multimodal_config
         self.quant_config = quant_config
 
+        # Per-component quantization: resolve configs for visual vs language_model
+        visual_quant_config = quant_config
+        language_quant_config = quant_config
+        try:
+            from vllm_omni.quantization.component_config import ComponentQuantizationConfig
+
+            if isinstance(quant_config, ComponentQuantizationConfig):
+                visual_quant_config = quant_config._resolve("visual")
+                language_quant_config = quant_config._resolve("language_model")
+        except ImportError:
+            pass
+
         with self._mark_tower_model(vllm_config, "audio"):
             self.audio_tower = Qwen3OmniMoeAudioEncoder(
                 thinker_config.audio_config,
@@ -867,7 +879,7 @@ class Qwen3OmniMoeThinkerForConditionalGeneration(
             self.visual = Qwen3Omni_VisionTransformer(
                 vision_config=thinker_config.vision_config,
                 norm_eps=getattr(thinker_config.text_config, "rms_norm_eps", 1e-6),
-                quant_config=quant_config,
+                quant_config=visual_quant_config,
                 prefix=maybe_prefix(prefix, "visual"),
             )
 
@@ -882,11 +894,16 @@ class Qwen3OmniMoeThinkerForConditionalGeneration(
                 ]
 
         with self._mark_language_model(vllm_config):
+            lm_vllm_config = vllm_config.with_hf_config(
+                thinker_config.text_config,
+                architectures=["Qwen3MoeForCausalLM"],
+            )
+            if language_quant_config is not quant_config:
+                from dataclasses import replace
+
+                lm_vllm_config = replace(lm_vllm_config, quant_config=language_quant_config)
             self.language_model = Qwen3MoeLLMForCausalLM(
-                vllm_config=vllm_config.with_hf_config(
-                    thinker_config.text_config,
-                    architectures=["Qwen3MoeForCausalLM"],
-                ),
+                vllm_config=lm_vllm_config,
                 prefix=maybe_prefix(prefix, "language_model"),
             )
 

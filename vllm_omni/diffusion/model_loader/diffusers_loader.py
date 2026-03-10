@@ -342,28 +342,23 @@ class DiffusersPipelineLoader:
         quant_config = od_config.quantization_config
         if quant_config is None:
             return False
-        # Fast path: mapping-style config (e.g., DictConfig)
-        if isinstance(quant_config, dict):
-            method = str(quant_config.get("method", "")).lower()
-            if method != "gguf":
-                return False
-            gguf_model = quant_config.get("gguf_model")
-            if not gguf_model:
-                raise ValueError("GGUF quantization requires quantization_config.gguf_model")
+
+        # New API: DiffusionGGUFConfig (QuantizationConfig subclass)
+        from vllm_omni.quantization.gguf_config import DiffusionGGUFConfig
+
+        if isinstance(quant_config, DiffusionGGUFConfig):
+            if quant_config.gguf_model is None:
+                raise ValueError("GGUF quantization requires gguf_model")
             return True
 
-        # Normal path: DiffusionQuantizationConfig
-        if not hasattr(quant_config, "get_name"):
-            # Fallback: if it carries gguf_model, treat as GGUF
+        # Check by name for any config that reports as "gguf"
+        if hasattr(quant_config, "get_name") and quant_config.get_name() == "gguf":
             gguf_model = getattr(quant_config, "gguf_model", None)
-            return bool(gguf_model)
-        is_gguf = quant_config.get_name() == "gguf"
-        if not is_gguf:
-            return False
-        gguf_model = getattr(quant_config, "gguf_model", None)
-        if gguf_model is None:
-            raise ValueError("GGUF quantization requires quantization_config.gguf_model")
-        return True
+            if gguf_model is None:
+                raise ValueError("GGUF quantization requires gguf_model")
+            return True
+
+        return False
 
     def _is_transformer_source(self, source: "ComponentSource") -> bool:
         if source.subfolder == "transformer":

@@ -27,6 +27,9 @@ from vllm.model_executor.layers.linear import (
     QKVParallelLinear,
     RowParallelLinear,
 )
+from vllm.model_executor.layers.quantization.base_config import (
+    QuantizationConfig,
+)
 from vllm.model_executor.layers.vocab_parallel_embedding import VocabParallelEmbedding
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.transformers_utils.configs.bagel import BagelConfig
@@ -61,16 +64,27 @@ def patchify(imgs, p):
 
 
 class MLPconnector(nn.Module):
-    def __init__(self, input_dim, output_dim, activation="gelu_pytorch_tanh"):
+    def __init__(
+        self,
+        input_dim,
+        output_dim,
+        activation="gelu_pytorch_tanh",
+        quant_config: QuantizationConfig | None = None,
+        prefix: str = "",
+    ):
         super().__init__()
-        self.fc1 = ColumnParallelLinear(input_dim, output_dim, bias=True, gather_output=False)
+        self.fc1 = ColumnParallelLinear(
+            input_dim, output_dim, bias=True, gather_output=False, quant_config=quant_config, prefix=f"{prefix}.fc1"
+        )
         if activation == "gelu":
             self.act = nn.GELU()
         elif activation == "gelu_pytorch_tanh":
             self.act = nn.GELU(approximate="tanh")
         else:
             self.act = nn.ReLU()
-        self.fc2 = RowParallelLinear(output_dim, output_dim, bias=True, input_is_parallel=True)
+        self.fc2 = RowParallelLinear(
+            output_dim, output_dim, bias=True, input_is_parallel=True, quant_config=quant_config, prefix=f"{prefix}.fc2"
+        )
 
     def forward(self, x):
         x_parallel, _ = self.fc1(x)
@@ -132,6 +146,8 @@ class BagelMLP(nn.Module):
         hidden_size: int,
         intermediate_size: int,
         hidden_act: str = "silu",
+        quant_config: QuantizationConfig | None = None,
+        prefix: str = "",
     ) -> None:
         super().__init__()
         self.gate_proj = ColumnParallelLinear(
@@ -139,18 +155,24 @@ class BagelMLP(nn.Module):
             intermediate_size,
             bias=False,
             gather_output=False,
+            quant_config=quant_config,
+            prefix=f"{prefix}.gate_proj",
         )
         self.up_proj = ColumnParallelLinear(
             hidden_size,
             intermediate_size,
             bias=False,
             gather_output=False,
+            quant_config=quant_config,
+            prefix=f"{prefix}.up_proj",
         )
         self.down_proj = RowParallelLinear(
             intermediate_size,
             hidden_size,
             input_is_parallel=True,
             bias=False,
+            quant_config=quant_config,
+            prefix=f"{prefix}.down_proj",
         )
         if hidden_act != "silu":
             raise ValueError(f"Unsupported activation: {hidden_act}. Only silu is supported.")
@@ -266,7 +288,9 @@ class PackedAttentionMoT(nn.Module):
       - qkv_proj_moe_gen : stacks q_proj_moe_gen + k_proj_moe_gen + v_proj_moe_gen (gen vae)
     """
 
-    def __init__(self, config, layer_idx: int | None = None):
+    def __init__(
+        self, config, layer_idx: int | None = None, quant_config: QuantizationConfig | None = None, prefix: str = ""
+    ):
         super().__init__()
         self.layer_idx = layer_idx
         self.hidden_size = config.hidden_size
@@ -285,32 +309,38 @@ class PackedAttentionMoT(nn.Module):
         self.q_size = self.num_heads * self.head_dim
         self.kv_size = self.num_kv_heads * self.head_dim
 
-        # Understanding mode projections (stacked q/k/v)
         self.qkv_proj = QKVParallelLinear(
             self.hidden_size,
             self.head_dim,
             self.total_num_heads,
             self.total_num_kv_heads,
             bias=True,
+            quant_config=quant_config,
+            prefix=f"{prefix}.qkv_proj",
         )
         self.o_proj = RowParallelLinear(
             self.total_num_heads * self.head_dim,
             self.hidden_size,
             bias=False,
+            quant_config=quant_config,
+            prefix=f"{prefix}.o_proj",
         )
 
-        # Generation mode MoE projections (stacked q/k/v)
         self.qkv_proj_moe_gen = QKVParallelLinear(
             self.hidden_size,
             self.head_dim,
             self.total_num_heads,
             self.total_num_kv_heads,
             bias=True,
+            quant_config=quant_config,
+            prefix=f"{prefix}.qkv_proj_moe_gen",
         )
         self.o_proj_moe_gen = RowParallelLinear(
             self.total_num_heads * self.head_dim,
             self.hidden_size,
             bias=False,
+            quant_config=quant_config,
+            prefix=f"{prefix}.o_proj_moe_gen",
         )
 
         # QK normalization
@@ -449,14 +479,28 @@ class Qwen2MoTDecoderLayer(nn.Module):
         config,
         layer_idx: int | None = None,
         attn_module: type[nn.Module] | None = PackedAttentionMoT,
+        quant_config: QuantizationConfig | None = None,
+        prefix: str = "",
     ):
         super().__init__()
         self.hidden_size = config.hidden_size
 
-        self.self_attn = attn_module(config, layer_idx)
+        self.self_attn = attn_module(config, layer_idx, quant_config=quant_config, prefix=f"{prefix}.self_attn")
 
-        self.mlp = BagelMLP(config.hidden_size, config.intermediate_size, config.hidden_act)
-        self.mlp_moe_gen = BagelMLP(config.hidden_size, config.intermediate_size, config.hidden_act)
+        self.mlp = BagelMLP(
+            config.hidden_size,
+            config.intermediate_size,
+            config.hidden_act,
+            quant_config=quant_config,
+            prefix=f"{prefix}.mlp",
+        )
+        self.mlp_moe_gen = BagelMLP(
+            config.hidden_size,
+            config.intermediate_size,
+            config.hidden_act,
+            quant_config=quant_config,
+            prefix=f"{prefix}.mlp_moe_gen",
+        )
         self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.input_layernorm_moe_gen = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -535,7 +579,7 @@ class Qwen2MoTDecoderLayer(nn.Module):
 
 
 class Qwen2MoTModel(Qwen2PreTrainedModel):
-    def __init__(self, config):
+    def __init__(self, config, quant_config: QuantizationConfig | None = None, prefix: str = ""):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
@@ -544,7 +588,13 @@ class Qwen2MoTModel(Qwen2PreTrainedModel):
         self.embed_tokens = VocabParallelEmbedding(config.vocab_size, config.hidden_size)
         self.layers = nn.ModuleList(
             [
-                Qwen2MoTDecoderLayer(config, layer_idx, attn_module=PackedAttentionMoT)
+                Qwen2MoTDecoderLayer(
+                    config,
+                    layer_idx,
+                    attn_module=PackedAttentionMoT,
+                    quant_config=quant_config,
+                    prefix=f"{prefix}.layers.{layer_idx}",
+                )
                 for layer_idx in range(config.num_hidden_layers)
             ]
         )
@@ -626,9 +676,9 @@ class Qwen2MoTModel(Qwen2PreTrainedModel):
 class Qwen2MoTForCausalLM(Qwen2PreTrainedModel):
     _tied_weights_keys = ["lm_head.weight"]
 
-    def __init__(self, config):
+    def __init__(self, config, quant_config: QuantizationConfig | None = None, prefix: str = ""):
         super().__init__(config)
-        self.model = Qwen2MoTModel(config)
+        self.model = Qwen2MoTModel(config, quant_config=quant_config, prefix=f"{prefix}.model")
         self.vocab_size = config.vocab_size
 
         # Initialize weights and apply final processing
@@ -837,7 +887,14 @@ class Bagel(nn.Module):
     config_class = BagelConfig
     base_model_prefix = "bagel"
 
-    def __init__(self, language_model, vit_model, config: BagelConfig):
+    def __init__(
+        self,
+        language_model,
+        vit_model,
+        config: BagelConfig,
+        quant_config: QuantizationConfig | None = None,
+        prefix: str = "",
+    ):
         super().__init__()
         self.language_model = language_model
         self.hidden_size = config.llm_config.hidden_size
@@ -861,7 +918,13 @@ class Bagel(nn.Module):
             self.vit_patch_size = config.vit_config.patch_size
             self.vit_max_num_patch_per_side = config.vit_max_num_patch_per_side
             self.vit_hidden_size = config.vit_config.hidden_size
-            self.connector = MLPconnector(self.vit_hidden_size, self.hidden_size, config.connector_act)
+            self.connector = MLPconnector(
+                self.vit_hidden_size,
+                self.hidden_size,
+                config.connector_act,
+                quant_config=quant_config,
+                prefix=f"{prefix}.connector",
+            )
             self.vit_pos_embed = PositionEmbedding(self.vit_max_num_patch_per_side, self.hidden_size)
 
         self.get_flattened_position_ids = get_flattened_position_ids_extrapolate
