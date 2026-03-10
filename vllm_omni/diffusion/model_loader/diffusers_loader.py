@@ -311,7 +311,6 @@ class DiffusersPipelineLoader:
                     module.to(module_device)
 
     def load_weights(self, model: nn.Module, od_config: OmniDiffusionConfig) -> None:
-        # ForkedPdb().set_trace()
         weights_to_load = self._get_expected_parameter_names(model)
         loaded_weights = model.load_weights(self.get_all_weights(model))
 
