@@ -7,7 +7,7 @@ import random
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any
-import json
+
 import torch
 from pydantic import model_validator
 from typing_extensions import Self
@@ -491,12 +491,15 @@ class OmniDiffusionConfig:
             f"Failed to find available port after {max_attempts} attempts (started from port {original_port})"
         )
 
-
     def resolve_quantization(self):
         """Resolve quantization config. Can be called after tf_model_config is loaded."""
         # Try auto-detect from disk config
         disk_quant_config = self.tf_model_config.get("quantization_config", None)
-        if disk_quant_config is not None and isinstance(disk_quant_config, dict) and "quant_method" in disk_quant_config:
+        if (
+            disk_quant_config is not None
+            and isinstance(disk_quant_config, dict)
+            and "quant_method" in disk_quant_config
+        ):
             self.quantization_config = disk_quant_config
             quant_method = disk_quant_config.get("quant_method", None)
             self.quantization = quant_method
