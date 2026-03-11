@@ -14,7 +14,6 @@ if TYPE_CHECKING:
         QuantizationConfig,
     )
 
-
 logger = init_logger(__name__)
 
 
@@ -23,27 +22,12 @@ def validate_quant_config(
     model: torch.nn.Module | None = None,
     dtype: torch.dtype = torch.bfloat16,
 ) -> list[str]:
-    """Validate a quantization config and return a list of warnings.
-
-    Checks:
-    - GPU compute capability meets minimum requirement
-    - Activation dtype is supported
-    - Component prefixes match model structure (if model provided)
-
-    Args:
-        config: The quantization config to validate
-        model: Optional model to validate prefix matching against
-        dtype: The model dtype to validate against
-
-    Returns:
-        List of warning messages (empty if all checks pass)
-    """
+    """Validate a quantization config and return warnings."""
     if config is None:
         return []
 
     warnings: list[str] = []
 
-    # Check GPU capability
     if torch.cuda.is_available():
         capability = torch.cuda.get_device_capability()
         min_cap = config.get_min_capability()
@@ -54,7 +38,6 @@ def validate_quant_config(
                 f"required {min_cap} for {config.get_name()} quantization"
             )
 
-    # Check dtype support
     supported_dtypes = config.get_supported_act_dtypes()
     if supported_dtypes and dtype not in supported_dtypes:
         warnings.append(
@@ -62,7 +45,6 @@ def validate_quant_config(
             f"{supported_dtypes} for {config.get_name()} quantization"
         )
 
-    # Validate component prefixes against model structure
     if model is not None:
         _validate_component_prefixes(config, model, warnings)
 
@@ -74,7 +56,6 @@ def _validate_component_prefixes(
     model: torch.nn.Module,
     warnings: list[str],
 ) -> None:
-    """Check that component prefixes match actual model module names."""
     from .component_config import ComponentQuantizationConfig
 
     if not isinstance(config, ComponentQuantizationConfig):

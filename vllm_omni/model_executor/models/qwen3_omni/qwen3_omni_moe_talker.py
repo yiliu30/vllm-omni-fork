@@ -102,14 +102,10 @@ class Qwen3OmniMoeTalkerForConditionalGeneration(
         talker_config.text_config.rope_parameters = talker_config.text_config.rope_scaling
         talker_config.text_config.rope_parameters["rope_theta"] = talker_config.text_config.rope_theta
         quant_config = vllm_config.quant_config
-        # Per-component quantization: resolve talker-specific config
-        try:
-            from vllm_omni.quantization.component_config import ComponentQuantizationConfig
+        from vllm_omni.quantization.component_config import ComponentQuantizationConfig
 
-            if isinstance(quant_config, ComponentQuantizationConfig):
-                quant_config = quant_config._resolve("talker")
-        except ImportError:
-            pass
+        if isinstance(quant_config, ComponentQuantizationConfig):
+            quant_config = quant_config._resolve("talker")
         self.quant_config = quant_config
         self.prefix = prefix
         self.vllm_config = vllm_config
