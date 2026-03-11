@@ -4,10 +4,7 @@
 
 import pytest
 import torch
-
-# ---------------------------------------------------------------------------
-# build_quant_config — string specs
-# ---------------------------------------------------------------------------
+from torch import nn
 
 
 def test_build_quant_config_fp8():
@@ -33,11 +30,6 @@ def test_build_quant_config_invalid():
         build_quant_config("invalid_method")
 
 
-# ---------------------------------------------------------------------------
-# build_quant_config — dict specs
-# ---------------------------------------------------------------------------
-
-
 def test_build_quant_config_dict():
     from vllm_omni.quantization import build_quant_config
 
@@ -54,11 +46,6 @@ def test_build_quant_config_dict_not_mutated():
     copy = original.copy()
     build_quant_config(original)
     assert original == copy
-
-
-# ---------------------------------------------------------------------------
-# build_quant_config — per-component specs
-# ---------------------------------------------------------------------------
 
 
 def test_build_quant_config_per_component():
@@ -83,9 +70,23 @@ def test_build_quant_config_per_component_string():
     assert config.component_configs["transformer"].get_name() == "fp8"
 
 
-# ---------------------------------------------------------------------------
-# build_quant_config — passthrough
-# ---------------------------------------------------------------------------
+def test_build_quant_config_per_component_inner_dict_not_mutated():
+    """Inner component dicts should not be mutated by build_quant_config."""
+    from vllm_omni.quantization import build_quant_config
+
+    inner = {"method": "fp8", "activation_scheme": "static"}
+    original = inner.copy()
+    build_quant_config({"transformer": inner, "vae": None})
+    assert inner == original
+
+
+def test_flat_dict_not_misdetected_as_per_component():
+    """A flat config like {"activation_scheme": "static"} must NOT be treated
+    as a per-component dict — it should raise ValueError for missing 'method'."""
+    from vllm_omni.quantization import build_quant_config
+
+    with pytest.raises(ValueError, match="must have a 'method' key"):
+        build_quant_config({"activation_scheme": "static"})
 
 
 def test_build_quant_config_passthrough():
@@ -95,11 +96,6 @@ def test_build_quant_config_passthrough():
 
     fp8 = Fp8Config(is_checkpoint_fp8_serialized=False, activation_scheme="dynamic")
     assert build_quant_config(fp8) is fp8
-
-
-# ---------------------------------------------------------------------------
-# ComponentQuantizationConfig
-# ---------------------------------------------------------------------------
 
 
 def test_component_config_routing():
@@ -133,11 +129,6 @@ def test_component_config_with_default():
     assert config._resolve("vae.encoder") is None
 
 
-# ---------------------------------------------------------------------------
-# GGUF config
-# ---------------------------------------------------------------------------
-
-
 def test_gguf_config():
     from vllm_omni.quantization import build_quant_config
     from vllm_omni.quantization.gguf_config import DiffusionGGUFConfig
@@ -151,11 +142,6 @@ def test_gguf_config():
     assert isinstance(config, DiffusionGGUFConfig)
     assert config.gguf_model == "path/to/model.gguf"
     assert config.get_name() == "gguf"
-
-
-# ---------------------------------------------------------------------------
-# OmniDiffusionConfig integration
-# ---------------------------------------------------------------------------
 
 
 def test_integration_string():
@@ -185,15 +171,26 @@ def test_integration_no_quant():
     assert config.quantization_config is None
 
 
-# ---------------------------------------------------------------------------
-# Supported methods
-# ---------------------------------------------------------------------------
+def test_integration_per_component():
+    """OmniDiffusionConfig with per-component quantization dict."""
+    from vllm_omni.quantization import ComponentQuantizationConfig
+    from vllm_omni.diffusion.data import OmniDiffusionConfig
+
+    config = OmniDiffusionConfig(
+        model="test",
+        quantization_config={
+            "transformer": {"method": "fp8"},
+            "vae": None,
+        },
+    )
+    assert isinstance(config.quantization_config, ComponentQuantizationConfig)
+    assert config.quantization_config.component_configs["transformer"].get_name() == "fp8"
+    assert config.quantization_config.component_configs["vae"] is None
 
 
 def test_supported_methods_includes_vllm():
     from vllm_omni.quantization import SUPPORTED_QUANTIZATION_METHODS
 
-    # Must include core vLLM methods
     for method in ["fp8", "gguf", "awq", "gptq", "bitsandbytes"]:
         assert method in SUPPORTED_QUANTIZATION_METHODS, f"{method} missing"
 
@@ -201,27 +198,15 @@ def test_supported_methods_includes_vllm():
 def test_supported_methods_count():
     from vllm_omni.quantization import SUPPORTED_QUANTIZATION_METHODS
 
-    # vLLM has 35+ methods
     assert len(SUPPORTED_QUANTIZATION_METHODS) >= 30
 
 
-# ---------------------------------------------------------------------------
-# Per-component quantization integration test
-# ---------------------------------------------------------------------------
-
-
 def test_per_component_routing_with_model_layers():
-    """Verify per-component quantization routes correctly to model layers.
-
-    Builds a ComponentQuantizationConfig with FP8 for 'transformer' and
-    None for 'vae', then verifies get_quant_method() returns the correct
-    quantization method (or None) based on layer prefix.
-    """
+    """Verify get_quant_method() routes correctly on LinearBase layers."""
     from vllm.model_executor.layers.linear import LinearBase
 
     from vllm_omni.quantization import ComponentQuantizationConfig, build_quant_config
 
-    # Build per-component config: transformer at FP8, vae unquantized
     config = build_quant_config(
         {
             "transformer": {"method": "fp8"},
@@ -230,21 +215,12 @@ def test_per_component_routing_with_model_layers():
     )
     assert isinstance(config, ComponentQuantizationConfig)
 
-    # Simulate model layers with different prefixes
     transformer_layer = LinearBase(128, 128)
     vae_layer = LinearBase(128, 128)
 
-    # Transformer layers should get a quantization method
-    transformer_method = config.get_quant_method(transformer_layer, "transformer.blocks.0.attn.to_q")
-    assert transformer_method is not None, "Transformer layer should be quantized with FP8"
-
-    # VAE layers should NOT get a quantization method
-    vae_method = config.get_quant_method(vae_layer, "vae.encoder.conv_in")
-    assert vae_method is None, "VAE layer should not be quantized"
-
-    # Unknown prefix should also NOT get a quantization method (no default)
-    unknown_method = config.get_quant_method(transformer_layer, "unknown.layer.0.weight")
-    assert unknown_method is None, "Unknown prefix should not be quantized"
+    assert config.get_quant_method(transformer_layer, "transformer.blocks.0.attn.to_q") is not None
+    assert config.get_quant_method(vae_layer, "vae.encoder.conv_in") is None
+    assert config.get_quant_method(transformer_layer, "unknown.layer.0.weight") is None
 
 
 def test_per_component_routing_with_default():
@@ -262,18 +238,56 @@ def test_per_component_routing_with_default():
     assert isinstance(config, ComponentQuantizationConfig)
 
     layer = LinearBase(128, 128)
-
-    # VAE should be unquantized (explicit None)
     assert config.get_quant_method(layer, "vae.decoder.conv") is None
-
-    # Everything else should get FP8 from the default
-    method = config.get_quant_method(layer, "transformer.blocks.0.attn")
-    assert method is not None, "Default FP8 should apply to unmatched prefix"
+    assert config.get_quant_method(layer, "transformer.blocks.0.attn") is not None
 
 
-# ---------------------------------------------------------------------------
-# Validation
-# ---------------------------------------------------------------------------
+def test_multi_component_model_routing():
+    """Integration test: walk a multi-component model and verify per-component
+    quantization routes get_quant_method() correctly for every linear layer."""
+    from vllm.model_executor.layers.linear import LinearBase
+
+    from vllm_omni.quantization import ComponentQuantizationConfig, build_quant_config
+
+    # Build a mock multi-stage model mimicking Bagel/Qwen3-Omni layout
+    class MockTransformerBlock(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.attn_q = LinearBase(64, 64)
+            self.attn_k = LinearBase(64, 64)
+            self.mlp = LinearBase(64, 256)
+
+    class MockVAEBlock(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = LinearBase(64, 64)
+
+    class MockMultiStageModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.transformer = nn.ModuleDict({
+                "block_0": MockTransformerBlock(),
+                "block_1": MockTransformerBlock(),
+            })
+            self.vae = nn.ModuleDict({
+                "encoder": MockVAEBlock(),
+                "decoder": MockVAEBlock(),
+            })
+
+    model = MockMultiStageModel()
+    config = build_quant_config({
+        "transformer": {"method": "fp8", "activation_scheme": "dynamic"},
+        "vae": None,
+    })
+    assert isinstance(config, ComponentQuantizationConfig)
+
+    for name, module in model.named_modules():
+        if isinstance(module, LinearBase):
+            method = config.get_quant_method(module, name)
+            if name.startswith("transformer"):
+                assert method is not None, f"{name} should be quantized"
+            elif name.startswith("vae"):
+                assert method is None, f"{name} should NOT be quantized"
 
 
 def test_validate_quant_config():
@@ -281,7 +295,6 @@ def test_validate_quant_config():
 
     config = build_quant_config("fp8")
     warnings = validate_quant_config(config, dtype=torch.bfloat16)
-    # FP8 supports bfloat16, so no dtype warnings expected
     dtype_warnings = [w for w in warnings if "dtype" in w.lower()]
     assert len(dtype_warnings) == 0
 
@@ -289,5 +302,25 @@ def test_validate_quant_config():
 def test_validate_quant_config_none():
     from vllm_omni.quantization import validate_quant_config
 
-    # Validating None should return empty warnings
     assert validate_quant_config(None) == []
+
+
+def test_validate_component_prefixes():
+    """Validation should warn about unmatched component prefixes."""
+    from vllm_omni.quantization import build_quant_config, validate_quant_config
+
+    config = build_quant_config({
+        "transformer": "fp8",
+        "nonexistent_component": None,
+    })
+
+    # Build a simple model to validate against
+    class SimpleModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.transformer = nn.Linear(64, 64)
+
+    model = SimpleModel()
+    warnings = validate_quant_config(config, model=model)
+    prefix_warnings = [w for w in warnings if "nonexistent_component" in w]
+    assert len(prefix_warnings) > 0, "Should warn about unmatched prefix"
