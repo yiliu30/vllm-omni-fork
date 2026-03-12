@@ -6,6 +6,8 @@ import pytest
 import torch
 from torch import nn
 
+pytestmark = [pytest.mark.core_model, pytest.mark.diffusion]
+
 
 def test_build_quant_config_fp8():
     from vllm_omni.quantization import build_quant_config
