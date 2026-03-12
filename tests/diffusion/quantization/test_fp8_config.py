@@ -20,7 +20,6 @@ def test_build_quant_config_none():
     from vllm_omni.quantization import build_quant_config
 
     assert build_quant_config(None) is None
-    assert build_quant_config("none") is None
 
 
 def test_build_quant_config_invalid():
@@ -147,7 +146,7 @@ def test_gguf_config():
 def test_integration_string():
     from vllm_omni.diffusion.data import OmniDiffusionConfig
 
-    config = OmniDiffusionConfig(model="test", quantization="fp8")
+    config = OmniDiffusionConfig(model="test", quantization_config="fp8")
     assert config.quantization_config is not None
     assert config.quantization_config.get_name() == "fp8"
 
@@ -173,8 +172,8 @@ def test_integration_no_quant():
 
 def test_integration_per_component():
     """OmniDiffusionConfig with per-component quantization dict."""
-    from vllm_omni.quantization import ComponentQuantizationConfig
     from vllm_omni.diffusion.data import OmniDiffusionConfig
+    from vllm_omni.quantization import ComponentQuantizationConfig
 
     config = OmniDiffusionConfig(
         model="test",
@@ -265,20 +264,26 @@ def test_multi_component_model_routing():
     class MockMultiStageModel(nn.Module):
         def __init__(self):
             super().__init__()
-            self.transformer = nn.ModuleDict({
-                "block_0": MockTransformerBlock(),
-                "block_1": MockTransformerBlock(),
-            })
-            self.vae = nn.ModuleDict({
-                "encoder": MockVAEBlock(),
-                "decoder": MockVAEBlock(),
-            })
+            self.transformer = nn.ModuleDict(
+                {
+                    "block_0": MockTransformerBlock(),
+                    "block_1": MockTransformerBlock(),
+                }
+            )
+            self.vae = nn.ModuleDict(
+                {
+                    "encoder": MockVAEBlock(),
+                    "decoder": MockVAEBlock(),
+                }
+            )
 
     model = MockMultiStageModel()
-    config = build_quant_config({
-        "transformer": {"method": "fp8", "activation_scheme": "dynamic"},
-        "vae": None,
-    })
+    config = build_quant_config(
+        {
+            "transformer": {"method": "fp8", "activation_scheme": "dynamic"},
+            "vae": None,
+        }
+    )
     assert isinstance(config, ComponentQuantizationConfig)
 
     for name, module in model.named_modules():
@@ -294,25 +299,29 @@ def test_validate_quant_config():
     from vllm_omni.quantization import build_quant_config, validate_quant_config
 
     config = build_quant_config("fp8")
-    warnings = validate_quant_config(config, dtype=torch.bfloat16)
-    dtype_warnings = [w for w in warnings if "dtype" in w.lower()]
-    assert len(dtype_warnings) == 0
+    # Should not raise — bfloat16 is a supported dtype for fp8
+    validate_quant_config(config, dtype=torch.bfloat16)
 
 
 def test_validate_quant_config_none():
     from vllm_omni.quantization import validate_quant_config
 
-    assert validate_quant_config(None) == []
+    # Should return None (no-op) without raising
+    assert validate_quant_config(None) is None
 
 
-def test_validate_component_prefixes():
+def test_validate_component_prefixes(caplog):
     """Validation should warn about unmatched component prefixes."""
+    import logging
+
     from vllm_omni.quantization import build_quant_config, validate_quant_config
 
-    config = build_quant_config({
-        "transformer": "fp8",
-        "nonexistent_component": None,
-    })
+    config = build_quant_config(
+        {
+            "transformer": "fp8",
+            "nonexistent_component": None,
+        }
+    )
 
     # Build a simple model to validate against
     class SimpleModel(nn.Module):
@@ -321,6 +330,6 @@ def test_validate_component_prefixes():
             self.transformer = nn.Linear(64, 64)
 
     model = SimpleModel()
-    warnings = validate_quant_config(config, model=model)
-    prefix_warnings = [w for w in warnings if "nonexistent_component" in w]
-    assert len(prefix_warnings) > 0, "Should warn about unmatched prefix"
+    with caplog.at_level(logging.WARNING):
+        validate_quant_config(config, model=model)
+    assert any("nonexistent_component" in msg for msg in caplog.messages), "Should warn about unmatched prefix"

@@ -2,8 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """DEPRECATED: Use vllm_omni.quantization instead.
 
-This module is kept only as a stub to avoid import errors from
-third-party code. All quantization logic lives in
+This stub will be removed in v0.3.0. All quantization logic lives in
 vllm_omni.quantization.
 """
 

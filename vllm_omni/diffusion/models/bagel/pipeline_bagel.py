@@ -225,6 +225,10 @@ class BagelPipeline(nn.Module, DiffusionPipelineProfilerMixin):
         )
 
         quant_config = od_config.quantization_config
+        # Bagel uses explicit prefixes ("bagel.language_model", "bagel") because
+        # its model structure nests components under a top-level "bagel" module,
+        # unlike other pipelines where the transformer is the root module.
+        # This ensures ComponentQuantizationConfig prefix matching works correctly.
         self.language_model = Qwen2MoTForCausalLM(llm_config, quant_config=quant_config, prefix="bagel.language_model")
         ae_params: AutoEncoderParams = default_ae_params()
         self.vae = AutoEncoder(ae_params)

@@ -42,7 +42,11 @@ SUPPORTED_QUANTIZATION_METHODS: list[str] = list(dict.fromkeys(QUANTIZATION_METH
 
 
 def _build_single(method: str, **kwargs: Any) -> QuantizationConfig:
-    """Build a single QuantizationConfig by method name."""
+    """Build a single QuantizationConfig by method name.
+
+    Resolution: _OVERRIDES first, then vLLM registry.
+    Tries direct __init__, falls back to from_config().
+    """
     method = method.lower()
 
     if method in _OVERRIDES:
@@ -52,32 +56,18 @@ def _build_single(method: str, **kwargs: Any) -> QuantizationConfig:
         raise ValueError(f"Unknown quantization method: {method!r}. Supported: {SUPPORTED_QUANTIZATION_METHODS}")
 
     config_cls = get_quantization_config(method)
-
-    if kwargs:
-        try:
-            return config_cls(**kwargs)
-        except TypeError:
-            pass
-        try:
-            return config_cls.from_config(kwargs)
-        except (TypeError, KeyError, ValueError):
-            sig = inspect.signature(config_cls.__init__)
-            raise TypeError(
-                f"Cannot instantiate {config_cls.__name__} with kwargs {kwargs}. Expected signature: {sig}"
-            ) from None
+    config_kwargs = kwargs if kwargs else {}
 
     try:
-        return config_cls()
+        return config_cls(**config_kwargs)
     except TypeError:
         pass
     try:
-        return config_cls.from_config({})
+        return config_cls.from_config(config_kwargs)
     except (TypeError, KeyError, ValueError):
         sig = inspect.signature(config_cls.__init__)
         raise TypeError(
-            f"Cannot instantiate {config_cls.__name__} without arguments. "
-            f"Expected signature: {sig}. "
-            f"Provide constructor kwargs via dict config."
+            f"Cannot instantiate {config_cls.__name__} with kwargs {config_kwargs}. Expected signature: {sig}"
         ) from None
 
 
@@ -145,8 +135,6 @@ def build_quant_config(
         return spec
 
     if isinstance(spec, str):
-        if spec.lower() == "none":
-            return None
         logger.info("Building quantization config: %s", spec)
         return _build_single(spec, **kwargs)
 
