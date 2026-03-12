@@ -7,7 +7,7 @@ import re
 import time
 from collections.abc import Generator, Iterable
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import torch
 from huggingface_hub import hf_hub_download
@@ -33,6 +33,9 @@ from vllm_omni.diffusion.data import OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.hsdp import HSDPInferenceConfig
 from vllm_omni.diffusion.model_loader.gguf_adapters import get_gguf_adapter
 from vllm_omni.diffusion.registry import initialize_model
+
+if TYPE_CHECKING:
+    from vllm_omni.diffusion.data import OmniDiffusionConfig
 
 logger = init_logger(__name__)
 
@@ -276,7 +279,7 @@ class DiffusersPipelineLoader:
                     self._load_weights_with_gguf(model, od_config)
                 else:
                     # Quantization does not happen in `load_weights` but after it
-                    self.load_weights(model)
+                    self.load_weights(model, od_config)
 
             # Process weights after loading for quantization (e.g., FP8 online quantization)
             # This is needed for vLLM's quantization methods that need to transform weights
@@ -307,7 +310,7 @@ class DiffusersPipelineLoader:
                 if needs_device_move:
                     module.to(module_device)
 
-    def load_weights(self, model: nn.Module) -> None:
+    def load_weights(self, model: nn.Module, od_config: OmniDiffusionConfig) -> None:
         weights_to_load = self._get_expected_parameter_names(model)
         loaded_weights = model.load_weights(self.get_all_weights(model))
 
@@ -323,11 +326,15 @@ class DiffusersPipelineLoader:
         if loaded_weights is not None:
             weights_not_loaded = weights_to_load - loaded_weights
             if weights_not_loaded:
-                logger.warning(
-                    "Following weights were not initialized from checkpoint: %s",
-                    weights_not_loaded,
-                )
-                # raise ValueError(f"Following weights were not initialized from checkpoint: {weights_not_loaded}")
+                if od_config.quantization is None:
+                    raise ValueError(f"Following weights were not initialized from checkpoint: {weights_not_loaded}")
+                else:
+                    logger.warning(
+                        "Following weights were not initialized from "
+                        "checkpoint (this may be expected for "
+                        "quantized models): %s",
+                        weights_not_loaded,
+                    )
 
     def _is_gguf_quantization(self, od_config: OmniDiffusionConfig) -> bool:
         quant_config = od_config.quantization_config
