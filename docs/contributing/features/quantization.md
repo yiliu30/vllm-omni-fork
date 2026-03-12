@@ -41,9 +41,9 @@ Key classes:
 
 | Class | Location | Purpose |
 |-------|----------|---------|
-| `DiffusionFp8Config` | `vllm_omni/diffusion/quantization/fp8.py` | Diffusion-specific FP8 config |
-| `DiffusionQuantizationConfig` | `vllm_omni/diffusion/quantization/base.py` | Base class for all quant configs |
-| `get_vllm_quant_config_for_layers` | `vllm_omni/diffusion/quantization/__init__.py` | Extracts vLLM config for linear layers |
+| `build_quant_config` | `vllm_omni/quantization/__init__.py` | Build quantization config from string/dict/per-component spec |
+| `ComponentQuantizationConfig` | `vllm_omni/quantization/component_config.py` | Per-component routing by layer prefix |
+| `validate_quant_config` | `vllm_omni/quantization/validation.py` | Validate config against GPU capability and dtype |
 
 **2. FP8 Weight Storage via Hooks (for text encoder and VAE)**
 
@@ -60,7 +60,7 @@ Key function:
 
 | Function | Location | Purpose |
 |----------|----------|---------|
-| `apply_fp8_weight_storage` | `vllm_omni/diffusion/models/utils.py` | Apply FP8 hooks to Linear/Conv layers (introduced in [#1414](https://github.com/vllm-project/vllm-omni/pull/1414)) |
+| `apply_fp8_weight_storage` | `vllm_omni/diffusion/models/utils.py` | Apply FP8 hooks to Linear/Conv layers (introduced in [#1412](https://github.com/vllm-project/vllm-omni/pull/1412)) |
 
 ---
 
@@ -162,15 +162,15 @@ To identify sensitive layers for a new model:
 In the pipeline's `__init__`, extract the vLLM quant config and pass it to the transformer:
 
 ```python
-from vllm_omni.diffusion.quantization import get_vllm_quant_config_for_layers
+from vllm_omni.quantization import build_quant_config
 
 class YourPipeline(nn.Module):
     def __init__(self, *, od_config: OmniDiffusionConfig, prefix: str = ""):
         super().__init__()
         # ... load scheduler, text_encoder, vae ...
 
-        # Extract vLLM quant config for linear layers
-        quant_config = get_vllm_quant_config_for_layers(od_config.quantization_config)
+        # Build quant config from OmniDiffusionConfig
+        quant_config = build_quant_config(od_config.quantization_config)
 
         # Pass to transformer
         self.transformer = YourTransformer2DModel(
@@ -185,7 +185,7 @@ class YourPipeline(nn.Module):
 For models loaded via `from_pretrained()`, apply hook-based FP8 weight storage.
 
 !!! note
-    The `apply_fp8_weight_storage` function is provided by `vllm_omni/diffusion/models/utils.py`, introduced in [PR #1414](https://github.com/vllm-project/vllm-omni/pull/1414). This step only applies once that PR has been merged.
+    The `apply_fp8_weight_storage` function is provided by `vllm_omni/diffusion/models/utils.py`, introduced in [PR #1412](https://github.com/vllm-project/vllm-omni/pull/1412).
 
 ```python
 from vllm_omni.diffusion.models.utils import apply_fp8_weight_storage
@@ -321,7 +321,7 @@ omni = Omni(
 | Model | Pipeline File | Transformer File | Notes |
 |-------|-------------|-----------------|-------|
 | **Z-Image** | `models/z_image/pipeline_z_image.py` | `models/z_image/z_image_transformer.py` | DiT + text encoder FP8 |
-| **Qwen-Image** | `models/qwen_image/pipeline_qwen_image.py` | `models/qwen_image/qwen_image_transformer.py` | DiT FP8 (text encoder + VAE FP8 in [#1414](https://github.com/vllm-project/vllm-omni/pull/1414)) |
+| **Qwen-Image** | `models/qwen_image/pipeline_qwen_image.py` | `models/qwen_image/qwen_image_transformer.py` | DiT + text encoder + VAE FP8 |
 
 All files are under `vllm_omni/diffusion/`.
 
