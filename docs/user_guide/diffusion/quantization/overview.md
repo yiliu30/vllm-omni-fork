@@ -1,51 +1,6 @@
-# Quantization for Diffusion and Omni Models
+# Quantization for Diffusion Models
 
-vLLM-OMNI provides a unified quantization framework that delegates to vLLM's quantization registry (35+ methods) with extensions for multi-stage models.
-
-## Quick Start
-
-### Single Method
-
-```python
-from vllm_omni import Omni
-from vllm_omni.inputs.data import OmniDiffusionSamplingParams
-
-# String shorthand (dynamic activation quantization)
-omni = Omni(model="<your-model>", quantization="fp8")
-
-# Dict with parameters (static activation quantization)
-omni = Omni(
-    model="<your-model>",
-    quantization_config={"method": "fp8", "activation_scheme": "static"},
-)
-```
-
-### Per-Component Quantization
-
-Multi-stage models like Bagel or Qwen3-Omni have components (transformer, VAE, talker, etc.) that benefit from different quantization:
-
-```python
-# Quantize transformer with FP8, leave VAE unquantized
-omni = Omni(
-    model="ByteDance-Seed/BAGEL-7B-MoT",
-    quantization_config={
-        "language_model": {"method": "fp8"},
-        "vae": None,
-    },
-)
-
-# Qwen3-Omni: different configs per component
-omni = Omni(
-    model="Qwen/Qwen3-Omni",
-    quantization_config={
-        "visual": None,
-        "language_model": {"method": "fp8", "activation_scheme": "dynamic"},
-        "talker": {"method": "fp8"},
-    },
-)
-```
-
-Routing uses longest-prefix match on layer names, so `"transformer"` matches `transformer.blocks.0.attn.to_q`, etc.
+vLLM-Omni supports quantization of diffusion model components to reduce memory usage and accelerate inference. This includes DiT, text encoders, and VAEs.
 
 ## Supported Methods
 
@@ -59,31 +14,28 @@ Routing uses longest-prefix match on layer names, so `"transformer"` matches `tr
 | BitsAndBytes | — | BitsAndBytes (INT8/NF4) | SM 75 |
 | ModelOpt | — | NVIDIA ModelOpt (INT4, FP8, NVFP4, MXFP4) | Varies |
 
-All methods from vLLM's `QUANTIZATION_METHODS` registry are automatically available. Run `from vllm_omni.quantization import SUPPORTED_QUANTIZATION_METHODS` to see the full list.
+## Quantization Scope
 
-## Dynamic vs Static Quantization
+When `--quantization fp8` is enabled, the following components are quantized:
 
-- **Dynamic** (`activation_scheme="dynamic"`): Activations quantized on-the-fly. No calibration needed. Default for FP8.
-- **Static** (`activation_scheme="static"`): Uses pre-calibrated activation scales from the checkpoint. Requires a model calibrated with `llm-compressor` or NVIDIA ModelOpt.
+| Component | What Gets Quantized | Mechanism |
+|-----------|-------------------|-----------|
+| **DiT (transformer)** | `nn.Linear` layers | vLLM W8A8 FP8 compute (Ada/Hopper) or weight-only (older GPUs) |
+| **Text encoder** | `nn.Linear` layers | FP8 weight storage, BF16 compute |
+| **VAE** | `nn.Conv2d`, `nn.Conv3d` layers | FP8 weight storage, BF16 compute |
 
-```python
-# Dynamic (default)
-omni = Omni(model="<your-model>", quantization="fp8")
-
-# Static (requires calibrated checkpoint)
-omni = Omni(
-    model="<your-model>",
-    quantization_config={"method": "fp8", "activation_scheme": "static"},
-)
-```
+!!! note
+    Not all models support all three components. See the [FP8 supported models table](fp8.md#supported-models) for per-model details.
 
 ## Device Compatibility for FP8
 
-| GPU Generation | Example GPUs | FP8 Mode |
-|---------------|-------------------|----------|
-| Ada/Hopper (SM 89+) | RTX 4090, H100, H200 | Full W8A8 with native hardware |
+| Device | Example Hardware | FP8 Mode |
+|--------|-----------------|----------|
+| Ada/Hopper GPU (SM 89+) | RTX 4090, H100, H200 | Full W8A8 with native hardware (DiT) + weight storage (encoder/VAE) |
+| Turing/Ampere GPU (SM 75-86) | RTX 3090, A100 | Weight-only via Marlin kernel (DiT) + weight storage (encoder/VAE) |
+| Ascend NPU | Atlas 800T A2 (910B) | Not yet supported |
 
-Kernel selection is automatic.
+Kernel selection is automatic on CUDA GPUs.
 
 ## Device Compatibility for Int8
 
