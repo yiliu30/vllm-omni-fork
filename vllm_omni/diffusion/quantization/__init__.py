@@ -2,8 +2,20 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """DEPRECATED: Use vllm_omni.quantization instead.
 
-This stub will be removed in v0.3.0. All quantization logic lives in
-vllm_omni.quantization.
+This shim will be removed in v0.3.0.
 """
 
-raise ImportError("vllm_omni.diffusion.quantization has been removed. Use vllm_omni.quantization instead.")
+import warnings
+
+warnings.warn(
+    "vllm_omni.diffusion.quantization is deprecated. "
+    "Use vllm_omni.quantization instead. This shim will be removed in v0.3.0.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
+from vllm_omni.quantization import (  # noqa: F401, E402
+    ComponentQuantizationConfig,
+    SUPPORTED_QUANTIZATION_METHODS,
+    build_quant_config,
+)

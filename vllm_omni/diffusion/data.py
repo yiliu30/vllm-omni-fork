@@ -576,7 +576,6 @@ class OmniDiffusionConfig:
                     f"got {type(self.quantization_config)!r}"
                 )
 
-
         if self.max_cpu_loras is None:
             self.max_cpu_loras = 1
         elif self.max_cpu_loras < 1:

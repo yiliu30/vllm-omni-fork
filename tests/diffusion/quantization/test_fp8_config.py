@@ -24,6 +24,12 @@ def test_build_quant_config_none():
     assert build_quant_config(None) is None
 
 
+def test_build_quant_config_none_string():
+    from vllm_omni.quantization import build_quant_config
+
+    assert build_quant_config("none") is None
+
+
 def test_build_quant_config_invalid():
     from vllm_omni.quantization import build_quant_config
 

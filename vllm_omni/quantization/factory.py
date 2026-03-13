@@ -44,8 +44,7 @@ SUPPORTED_QUANTIZATION_METHODS: list[str] = list(dict.fromkeys(QUANTIZATION_METH
 def _build_single(method: str, **kwargs: Any) -> QuantizationConfig:
     """Build a single QuantizationConfig by method name.
 
-    Resolution: _OVERRIDES first, then vLLM registry.
-    Tries direct __init__, falls back to from_config().
+    Resolution: _OVERRIDES first, then vLLM registry via from_config().
     """
     method = method.lower()
 
