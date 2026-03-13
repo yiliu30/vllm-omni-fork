@@ -18,7 +18,7 @@ from vllm.model_executor.layers.quantization.base_config import (
 )
 
 from vllm_omni.diffusion.utils.network_utils import is_port_available
-from vllm_omni.quantization import build_quant_config, validate_quant_config
+from vllm_omni.quantization import build_quant_config
 
 # Import after TYPE_CHECKING to avoid circular imports at runtime
 # The actual import is deferred to __post_init__ to avoid import order issues
@@ -576,8 +576,6 @@ class OmniDiffusionConfig:
                     f"got {type(self.quantization_config)!r}"
                 )
 
-            # Validate — self.dtype is already normalized to torch.dtype above
-            validate_quant_config(self.quantization_config, dtype=self.dtype)
 
         if self.max_cpu_loras is None:
             self.max_cpu_loras = 1

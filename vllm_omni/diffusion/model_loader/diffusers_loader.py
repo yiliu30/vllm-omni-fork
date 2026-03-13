@@ -284,11 +284,6 @@ class DiffusersPipelineLoader:
                     # Quantization does not happen in `load_weights` but after it
                     self.load_weights(model)
 
-            # Validate component prefixes now that the model is loaded
-            from vllm_omni.quantization import validate_quant_config
-
-            validate_quant_config(od_config.quantization_config, model=model, dtype=od_config.dtype)
-
             # Process weights after loading for quantization (e.g., FP8 online quantization)
             # This is needed for vLLM's quantization methods that need to transform weights
             self._process_weights_after_loading(model, target_device)
