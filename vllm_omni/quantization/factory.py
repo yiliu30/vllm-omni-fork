@@ -56,12 +56,8 @@ def _build_single(method: str, **kwargs: Any) -> QuantizationConfig:
         raise ValueError(f"Unknown quantization method: {method!r}. Supported: {SUPPORTED_QUANTIZATION_METHODS}")
 
     config_cls = get_quantization_config(method)
-    config_kwargs = kwargs if kwargs else {}
 
-    try:
-        return config_cls(**config_kwargs)
-    except TypeError:
-        pass
+    config_kwargs = kwargs if kwargs else {}
     try:
         return config_cls.from_config(config_kwargs)
     except (TypeError, KeyError, ValueError):

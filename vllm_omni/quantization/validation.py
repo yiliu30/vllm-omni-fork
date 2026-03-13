@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import torch
 from vllm.logger import init_logger
+from vllm.platforms import current_platform
 
 if TYPE_CHECKING:
     from vllm.model_executor.layers.quantization.base_config import (
@@ -28,17 +29,13 @@ def validate_quant_config(
     if config is None:
         return
 
-    if torch.cuda.is_available():
-        capability = torch.cuda.get_device_capability()
-        min_cap = config.get_min_capability()
-        device_cap = capability[0] * 10 + capability[1]
-        if device_cap < min_cap:
-            logger.warning(
-                "GPU compute capability %s is below minimum required %s for %s quantization",
-                capability,
-                min_cap,
-                config.get_name(),
-            )
+    min_cap = config.get_min_capability()
+    if not current_platform.has_device_capability(min_cap):
+        logger.warning(
+            "GPU compute capability is below minimum required %s for %s quantization",
+            min_cap,
+            config.get_name(),
+        )
 
     supported_dtypes = config.get_supported_act_dtypes()
     if supported_dtypes and dtype not in supported_dtypes:
