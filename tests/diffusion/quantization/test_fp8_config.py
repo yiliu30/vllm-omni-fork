@@ -116,9 +116,9 @@ def test_component_config_routing():
     )
 
     assert config.get_name() == "component"
-    assert config._resolve("transformer.blocks.0.attn") is fp8
-    assert config._resolve("vae.encoder.conv_in") is None
-    assert config._resolve("unknown.layer") is None
+    assert config.resolve("transformer.blocks.0.attn") is fp8
+    assert config.resolve("vae.encoder.conv_in") is None
+    assert config.resolve("unknown.layer") is None
 
 
 def test_component_config_with_default():
@@ -132,8 +132,8 @@ def test_component_config_with_default():
         default_config=fp8,
     )
 
-    assert config._resolve("transformer.blocks.0") is fp8
-    assert config._resolve("vae.encoder") is None
+    assert config.resolve("transformer.blocks.0") is fp8
+    assert config.resolve("vae.encoder") is None
 
 
 def test_gguf_config():

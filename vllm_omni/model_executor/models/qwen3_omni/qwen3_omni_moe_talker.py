@@ -104,7 +104,7 @@ class Qwen3OmniMoeTalkerForConditionalGeneration(
         talker_config.text_config.rope_parameters["rope_theta"] = talker_config.text_config.rope_theta
         quant_config = vllm_config.quant_config
         if isinstance(quant_config, ComponentQuantizationConfig):
-            quant_config = quant_config._resolve("talker")
+            quant_config = quant_config.resolve("talker")
         self.quant_config = quant_config
         self.prefix = prefix
         self.vllm_config = vllm_config

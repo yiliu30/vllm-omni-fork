@@ -855,8 +855,8 @@ class Qwen3OmniMoeThinkerForConditionalGeneration(
         visual_quant_config = quant_config
         language_quant_config = quant_config
         if isinstance(quant_config, ComponentQuantizationConfig):
-            visual_quant_config = quant_config._resolve("visual")
-            language_quant_config = quant_config._resolve("language_model")
+            visual_quant_config = quant_config.resolve("visual")
+            language_quant_config = quant_config.resolve("language_model")
             logger.debug(
                 "Per-component quant: visual=%s, language_model=%s",
                 visual_quant_config.get_name() if visual_quant_config else None,

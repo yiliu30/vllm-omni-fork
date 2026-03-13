@@ -35,7 +35,7 @@ class ComponentQuantizationConfig(QuantizationConfig):
         self._default = default_config
         self._sorted_prefixes = sorted(self._components.keys(), key=len, reverse=True)
 
-    def _resolve(self, prefix: str) -> QuantizationConfig | None:
+    def resolve(self, prefix: str) -> QuantizationConfig | None:
         """Find the config for a given layer prefix (longest-prefix match).
 
         Note: vLLM may remap quantization prefixes vs model definition
@@ -51,7 +51,7 @@ class ComponentQuantizationConfig(QuantizationConfig):
         return "component"
 
     def get_quant_method(self, layer: torch.nn.Module, prefix: str) -> QuantizeMethodBase | None:
-        config = self._resolve(prefix)
+        config = self.resolve(prefix)
         if config is None:
             return None
         return config.get_quant_method(layer, prefix)
