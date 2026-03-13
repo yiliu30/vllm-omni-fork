@@ -3,7 +3,6 @@
 """Tests for the unified quantization framework."""
 
 import pytest
-import torch
 from torch import nn
 
 pytestmark = [pytest.mark.core_model, pytest.mark.diffusion]

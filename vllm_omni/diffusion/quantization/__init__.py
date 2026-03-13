@@ -15,7 +15,7 @@ warnings.warn(
 )
 
 from vllm_omni.quantization import (  # noqa: F401, E402
-    ComponentQuantizationConfig,
     SUPPORTED_QUANTIZATION_METHODS,
+    ComponentQuantizationConfig,
     build_quant_config,
 )

@@ -13,10 +13,9 @@ Requirements:
 
 Image example (text-to-image):
     python benchmarks/diffusion/quantization_quality.py \
-        --model Qwen/Qwen-Image-2512 \
+        --model Tongyi-MAI/Z-Image-Turbo \
         --task t2i \
         --quantization fp8 \
-        --ignored-layers "img_mlp" \
         --prompts \
             "an aerial view of a coral reef with crystal clear turquoise water" \
             "a campfire in a dark forest with sparks rising into a starry sky" \
@@ -35,12 +34,11 @@ Video example (text-to-video):
         --height 720 --width 1280 \
         --num-frames 81 --num-inference-steps 40 --seed 42
 
-Ablation example (test multiple ignored-layers configs):
+Multiple quantization methods:
     python benchmarks/diffusion/quantization_quality.py \
-        --model Qwen/Qwen-Image-2512 \
+        --model Tongyi-MAI/Z-Image-Turbo \
         --task t2i \
-        --quantization fp8 \
-        --ablation-layers "img_mlp" "txt_mlp" "img_mlp,txt_mlp" \
+        --quantization fp8 int8 bitsandbytes \
         --prompts "a cup of coffee on the table" \
         --height 1024 --width 1024 \
         --num-inference-steps 50 --seed 42
@@ -48,7 +46,7 @@ Ablation example (test multiple ignored-layers configs):
 Output directory structure (--output-dir, default: ./quant_bench_output):
     quant_bench_output/
         baseline/           # BF16 outputs
-        quantized/          # Quantized outputs (or per-ablation subdirs)
+        <method>/           # Quantized outputs per method
         results.md          # Markdown table
 """
 
@@ -128,7 +126,7 @@ def compute_lpips_video(
     return float(np.mean(scores))
 
 
-def _build_omni_kwargs(args, quantization=None, ignored_layers=None):
+def _build_omni_kwargs(args, quantization=None):
     """Build kwargs dict for Omni() constructor."""
     from vllm_omni.diffusion.data import DiffusionParallelConfig
 
@@ -142,12 +140,7 @@ def _build_omni_kwargs(args, quantization=None, ignored_layers=None):
         "parallel_config": parallel_config,
         "enforce_eager": args.enforce_eager,
     }
-    if quantization and ignored_layers:
-        kwargs["quantization_config"] = {
-            "method": quantization,
-            "ignored_layers": [s.strip() for s in ignored_layers.split(",") if s.strip()],
-        }
-    elif quantization:
+    if quantization:
         kwargs["quantization_config"] = quantization
     return kwargs
 
@@ -155,7 +148,6 @@ def _build_omni_kwargs(args, quantization=None, ignored_layers=None):
 def _generate_image(omni, args, prompt, seed):
     """Generate a single image and return (PIL.Image, time_seconds, memory_gib)."""
     from vllm_omni.inputs.data import OmniDiffusionSamplingParams
-    from vllm_omni.outputs import OmniRequestOutput
     from vllm_omni.platforms import current_omni_platform
 
     generator = torch.Generator(device=current_omni_platform.device_type).manual_seed(seed)
@@ -175,10 +167,7 @@ def _generate_image(omni, args, prompt, seed):
 
     first = outputs[0]
     req_out = first.request_output[0] if hasattr(first, "request_output") else first
-    if isinstance(req_out, OmniRequestOutput):
-        img = req_out.images[0]
-    else:
-        img = req_out.images[0]
+    img = req_out.images[0]
     return img, elapsed, peak_mem
 
 
@@ -254,16 +243,9 @@ def run_benchmark(args):
     seed = args.seed
 
     # Determine configs to benchmark
-    configs = []  # list of (label, quantization, ignored_layers)
-    if args.ablation_layers:
-        for layers in args.ablation_layers:
-            label = f"{args.quantization} skip {layers}"
-            configs.append((label, args.quantization, layers))
-    else:
-        label = args.quantization
-        if args.ignored_layers:
-            label += f" skip {args.ignored_layers}"
-        configs.append((label, args.quantization, args.ignored_layers))
+    configs = []  # list of (label, quantization_method)
+    for method in args.quantization:
+        configs.append((method, method))
 
     # --- Baseline run ---
     print("\n" + "=" * 60)
@@ -304,12 +286,12 @@ def run_benchmark(args):
     # --- Quantized runs ---
     all_results = []  # list of dicts
 
-    for config_label, quant_method, ignored in configs:
+    for config_label, quant_method in configs:
         print(f"\n{'=' * 60}")
         print(f"Running: {config_label}...")
         print("=" * 60)
 
-        qt_kwargs = _build_omni_kwargs(args, quantization=quant_method, ignored_layers=ignored)
+        qt_kwargs = _build_omni_kwargs(args, quantization=quant_method)
         omni_qt = Omni(**qt_kwargs)
 
         qt_outputs = {}
@@ -349,14 +331,14 @@ def run_benchmark(args):
             per_prompt.append({"prompt": prompt, "lpips": lpips_score})
 
         mean_lpips = np.mean([p["lpips"] for p in per_prompt])
-        speedup = (bl_avg_time - qt_avg_time) / bl_avg_time * 100
+        speedup = bl_avg_time / qt_avg_time if qt_avg_time > 0 else float("inf")
         mem_reduction = (bl_mem - qt_mem) / bl_mem * 100
 
         all_results.append(
             {
                 "config": config_label,
                 "avg_time": qt_avg_time,
-                "speedup_pct": speedup,
+                "speedup": speedup,
                 "memory_gib": qt_mem,
                 "mem_reduction_pct": mem_reduction,
                 "mean_lpips": mean_lpips,
@@ -384,10 +366,10 @@ def run_benchmark(args):
     lines.append("")
     lines.append("| Config | Avg Time | Speedup | Memory (GiB) | Mem Reduction | Mean LPIPS |")
     lines.append("|--------|----------|---------|--------------|---------------|------------|")
-    lines.append(f"| BF16 baseline | {bl_avg_time:.2f}s | — | {bl_mem:.2f} | — | (ref) |")
+    lines.append(f"| BF16 baseline | {bl_avg_time:.2f}s | 1.00x | {bl_mem:.2f} | — | (ref) |")
     for r in all_results:
         lines.append(
-            f"| {r['config']} | {r['avg_time']:.2f}s | {r['speedup_pct']:.0f}% "
+            f"| {r['config']} | {r['avg_time']:.2f}s | {r['speedup']:.2f}x "
             f"| {r['memory_gib']:.2f} | {r['mem_reduction_pct']:.0f}% "
             f"| {r['mean_lpips']:.4f} |"
         )
@@ -439,19 +421,11 @@ def parse_args():
         choices=["t2i", "t2v"],
         help="Task type: t2i (text-to-image) or t2v (text-to-video).",
     )
-    parser.add_argument("--quantization", required=True, help="Quantization method (e.g. fp8, int8, bitsandbytes).")
     parser.add_argument(
-        "--ignored-layers",
-        type=str,
-        default=None,
-        help="Comma-separated layer patterns to skip quantization.",
-    )
-    parser.add_argument(
-        "--ablation-layers",
+        "--quantization",
         nargs="+",
-        default=None,
-        help="Run ablation: test multiple ignored-layers configs. "
-        'Each argument is a comma-separated string, e.g. "img_mlp" "txt_mlp" "img_mlp,txt_mlp".',
+        required=True,
+        help="One or more quantization methods to benchmark (e.g. fp8 int8 bitsandbytes).",
     )
     parser.add_argument(
         "--prompts",
