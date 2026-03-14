@@ -42,10 +42,10 @@ run_test() {
     echo "============================================================"
     if "$@"; then
         echo "  PASS: $name"
-        ((PASS++))
+        PASS=$((PASS + 1))
     else
         echo "  FAIL: $name (exit code $?)"
-        ((FAIL++))
+        FAIL=$((FAIL + 1))
     fi
 }
 
@@ -92,8 +92,8 @@ run_test "Qwen-Image FP8" \
 if [ "$SKIP_FLUX" = true ]; then
     echo ""
     echo "  SKIP: FLUX.1-dev (--skip-flux)"
-    ((SKIP++))
-    ((SKIP++))
+    SKIP=$((SKIP + 1))
+    SKIP=$((SKIP + 1))
 else
     run_test "FLUX.1-dev BF16 (baseline)" \
         python "$REPO_ROOT/examples/offline_inference/text_to_image/text_to_image.py" \
@@ -120,8 +120,8 @@ fi
 if [ "$SKIP_BAGEL" = true ]; then
     echo ""
     echo "  SKIP: BAGEL (--skip-bagel)"
-    ((SKIP++))
-    ((SKIP++))
+    SKIP=$((SKIP + 1))
+    SKIP=$((SKIP + 1))
 else
     run_test "BAGEL BF16 (baseline)" \
         python "$REPO_ROOT/examples/offline_inference/bagel/end2end.py" \
