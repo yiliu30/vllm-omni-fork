@@ -2,9 +2,9 @@
 # End-to-end test script for unified quantization framework (PR #1764).
 #
 # Tests FP8 quantization for:
-#   1. Z-Image-Turbo  (single-stage, ~10GB VRAM)
-#   2. Qwen-Image     (single-stage, ~10GB VRAM)
-#   3. FLUX.1-dev     (single-stage, ~25GB VRAM, needs --quantization fp8 or OOM)
+#   1. Z-Image-Turbo  (single-stage, ~20GB VRAM)
+#   2. Qwen-Image     (single-stage, ~20GB VRAM)
+#   3. FLUX.1-dev     (single-stage, ~25GB VRAM with fp8)
 #   4. BAGEL          (multi-stage LLM+DiT, ~55GB VRAM)
 #
 # Usage:
@@ -50,44 +50,51 @@ run_test() {
 }
 
 # ─── 1. Z-Image-Turbo ────────────────────────────────────────────────────────
+# Defaults from README: 1024x1024, 50 steps, cfg-scale 4.0, seed 42
 
 run_test "Z-Image-Turbo BF16 (baseline)" \
     python "$REPO_ROOT/examples/offline_inference/text_to_image/text_to_image.py" \
         --model Tongyi-MAI/Z-Image-Turbo \
         --prompt "a cup of coffee on the table" \
-        --seed 42 --num-inference-steps 2 \
-        --height 256 --width 256 \
+        --seed 42 --num-inference-steps 50 \
+        --height 1024 --width 1024 \
+        --cfg-scale 4.0 \
         --output "$OUTPUT_DIR/zimage_bf16.png"
 
 run_test "Z-Image-Turbo FP8" \
     python "$REPO_ROOT/examples/offline_inference/text_to_image/text_to_image.py" \
         --model Tongyi-MAI/Z-Image-Turbo \
         --prompt "a cup of coffee on the table" \
-        --seed 42 --num-inference-steps 2 \
-        --height 256 --width 256 \
+        --seed 42 --num-inference-steps 50 \
+        --height 1024 --width 1024 \
+        --cfg-scale 4.0 \
         --quantization fp8 \
         --output "$OUTPUT_DIR/zimage_fp8.png"
 
 # ─── 2. Qwen-Image ───────────────────────────────────────────────────────────
+# Defaults from README: 1024x1024, 50 steps, cfg-scale 4.0, seed 142
 
 run_test "Qwen-Image BF16 (baseline)" \
     python "$REPO_ROOT/examples/offline_inference/text_to_image/text_to_image.py" \
         --model Qwen/Qwen-Image \
         --prompt "a cup of coffee on the table" \
-        --seed 42 --num-inference-steps 2 \
-        --height 256 --width 256 \
+        --seed 142 --num-inference-steps 50 \
+        --height 1024 --width 1024 \
+        --cfg-scale 4.0 \
         --output "$OUTPUT_DIR/qwen_bf16.png"
 
 run_test "Qwen-Image FP8" \
     python "$REPO_ROOT/examples/offline_inference/text_to_image/text_to_image.py" \
         --model Qwen/Qwen-Image \
         --prompt "a cup of coffee on the table" \
-        --seed 42 --num-inference-steps 2 \
-        --height 256 --width 256 \
+        --seed 142 --num-inference-steps 50 \
+        --height 1024 --width 1024 \
+        --cfg-scale 4.0 \
         --quantization fp8 \
         --output "$OUTPUT_DIR/qwen_fp8.png"
 
 # ─── 3. FLUX.1-dev ───────────────────────────────────────────────────────────
+# Defaults from first test run: 1024x1024, 20 steps, guidance-scale 3.5
 
 if [ "$SKIP_FLUX" = true ]; then
     echo ""
@@ -99,8 +106,8 @@ else
         python "$REPO_ROOT/examples/offline_inference/text_to_image/text_to_image.py" \
             --model black-forest-labs/FLUX.1-dev \
             --prompt "a cup of coffee on the table" \
-            --seed 42 --num-inference-steps 4 \
-            --height 512 --width 512 \
+            --seed 42 --num-inference-steps 20 \
+            --height 1024 --width 1024 \
             --guidance-scale 3.5 --cfg-scale 1.0 \
             --output "$OUTPUT_DIR/flux_bf16.png"
 
@@ -108,14 +115,15 @@ else
         python "$REPO_ROOT/examples/offline_inference/text_to_image/text_to_image.py" \
             --model black-forest-labs/FLUX.1-dev \
             --prompt "a cup of coffee on the table" \
-            --seed 42 --num-inference-steps 4 \
-            --height 512 --width 512 \
+            --seed 42 --num-inference-steps 20 \
+            --height 1024 --width 1024 \
             --guidance-scale 3.5 --cfg-scale 1.0 \
             --quantization fp8 \
             --output "$OUTPUT_DIR/flux_fp8.png"
 fi
 
 # ─── 4. BAGEL (multi-stage) ──────────────────────────────────────────────────
+# Defaults from README: 50 steps, cfg-text-scale 4.0, cfg-img-scale 1.5
 
 if [ "$SKIP_BAGEL" = true ]; then
     echo ""
@@ -128,14 +136,20 @@ else
             --model ByteDance-Seed/BAGEL-7B-MoT \
             --modality text2img \
             --prompts "A cute cat" \
-            --steps 15
+            --steps 50 \
+            --cfg-text-scale 4.0 \
+            --cfg-img-scale 1.5 \
+            --seed 52
 
     run_test "BAGEL FP8 (diffusion-only quantization)" \
         python "$REPO_ROOT/examples/offline_inference/bagel/end2end.py" \
             --model ByteDance-Seed/BAGEL-7B-MoT \
             --modality text2img \
             --prompts "A cute cat" \
-            --steps 15 \
+            --steps 50 \
+            --cfg-text-scale 4.0 \
+            --cfg-img-scale 1.5 \
+            --seed 52 \
             --quantization fp8
 fi
 
