@@ -124,6 +124,8 @@ fi
 
 # ─── 4. BAGEL (multi-stage) ──────────────────────────────────────────────────
 # Defaults from README: 50 steps, cfg-text-scale 4.0, cfg-img-scale 1.5
+# BAGEL end2end.py saves images as output_1_stage_None_0.png in cwd.
+# We copy them to OUTPUT_DIR with proper names for LPIPS comparison.
 
 if [ "$SKIP_BAGEL" = true ]; then
     echo ""
@@ -131,26 +133,51 @@ if [ "$SKIP_BAGEL" = true ]; then
     SKIP=$((SKIP + 1))
     SKIP=$((SKIP + 1))
 else
-    run_test "BAGEL BF16 (baseline)" \
-        python "$REPO_ROOT/examples/offline_inference/bagel/end2end.py" \
-            --model ByteDance-Seed/BAGEL-7B-MoT \
-            --modality text2img \
-            --prompts "A cute cat" \
-            --steps 50 \
-            --cfg-text-scale 4.0 \
-            --cfg-img-scale 1.5 \
-            --seed 52
+    BAGEL_WORKDIR=$(mktemp -d)
 
-    run_test "BAGEL FP8 (diffusion-only quantization)" \
-        python "$REPO_ROOT/examples/offline_inference/bagel/end2end.py" \
+    run_test "BAGEL BF16 (baseline)" \
+        bash -c "cd '$BAGEL_WORKDIR' && python '$REPO_ROOT/examples/offline_inference/bagel/end2end.py' \
             --model ByteDance-Seed/BAGEL-7B-MoT \
             --modality text2img \
-            --prompts "A cute cat" \
+            --prompts 'A cute cat' \
             --steps 50 \
             --cfg-text-scale 4.0 \
             --cfg-img-scale 1.5 \
             --seed 52 \
-            --quantization fp8
+            && cp -f output_1_stage_None_0.png '$OUTPUT_DIR/bagel_bf16.png'"
+
+    run_test "BAGEL FP8 (diffusion-only quantization)" \
+        bash -c "cd '$BAGEL_WORKDIR' && python '$REPO_ROOT/examples/offline_inference/bagel/end2end.py' \
+            --model ByteDance-Seed/BAGEL-7B-MoT \
+            --modality text2img \
+            --prompts 'A cute cat' \
+            --steps 50 \
+            --cfg-text-scale 4.0 \
+            --cfg-img-scale 1.5 \
+            --seed 52 \
+            --quantization fp8 \
+            && cp -f output_1_stage_None_0.png '$OUTPUT_DIR/bagel_fp8.png'"
+
+    rm -rf "$BAGEL_WORKDIR"
+fi
+
+# ─── 5. LPIPS quality comparison ─────────────────────────────────────────────
+# Compares each BF16/FP8 image pair using perceptual LPIPS distance.
+# Requires: pip install lpips torchvision
+
+echo ""
+echo "============================================================"
+echo "  LPIPS Quality Comparison"
+echo "============================================================"
+
+if python -c "import lpips" 2>/dev/null; then
+    run_test "LPIPS BF16-vs-FP8 quality check" \
+        python "$SCRIPT_DIR/compute_lpips.py" \
+            --image-dir "$OUTPUT_DIR" \
+            --threshold 0.1
+else
+    echo "  SKIP: lpips not installed (pip install lpips torchvision)"
+    SKIP=$((SKIP + 1))
 fi
 
 # ─── Summary ─────────────────────────────────────────────────────────────────
@@ -163,6 +190,9 @@ echo "  PASS: $PASS"
 echo "  FAIL: $FAIL"
 echo "  SKIP: $SKIP"
 echo "  Output images: $OUTPUT_DIR/"
+if [ -f "$OUTPUT_DIR/lpips_results.md" ]; then
+    echo "  LPIPS report: $OUTPUT_DIR/lpips_results.md"
+fi
 echo "============================================================"
 
 if [ "$FAIL" -gt 0 ]; then
