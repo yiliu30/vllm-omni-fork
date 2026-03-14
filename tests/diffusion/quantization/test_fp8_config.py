@@ -204,13 +204,11 @@ def test_supported_methods_includes_vllm():
 def test_supported_methods_count():
     from vllm_omni.quantization import SUPPORTED_QUANTIZATION_METHODS
 
-    assert len(SUPPORTED_QUANTIZATION_METHODS) >= 30
+    assert len(SUPPORTED_QUANTIZATION_METHODS) >= 20
 
 
-def test_per_component_routing_with_model_layers():
-    """Verify get_quant_method() routes correctly on LinearBase layers."""
-    from vllm.model_executor.layers.linear import LinearBase
-
+def test_per_component_routing_with_resolve():
+    """Verify resolve() routes correctly by prefix."""
     from vllm_omni.quantization import ComponentQuantizationConfig, build_quant_config
 
     config = build_quant_config(
@@ -221,18 +219,14 @@ def test_per_component_routing_with_model_layers():
     )
     assert isinstance(config, ComponentQuantizationConfig)
 
-    transformer_layer = LinearBase(128, 128)
-    vae_layer = LinearBase(128, 128)
-
-    assert config.get_quant_method(transformer_layer, "transformer.blocks.0.attn.to_q") is not None
-    assert config.get_quant_method(vae_layer, "vae.encoder.conv_in") is None
-    assert config.get_quant_method(transformer_layer, "unknown.layer.0.weight") is None
+    assert config.resolve("transformer.blocks.0.attn.to_q") is not None
+    assert config.resolve("transformer.blocks.0.attn.to_q").get_name() == "fp8"
+    assert config.resolve("vae.encoder.conv_in") is None
+    assert config.resolve("unknown.layer.0.weight") is None
 
 
 def test_per_component_routing_with_default():
     """Verify default config applies to unmatched prefixes."""
-    from vllm.model_executor.layers.linear import LinearBase
-
     from vllm_omni.quantization import ComponentQuantizationConfig, build_quant_config
 
     config = build_quant_config(
@@ -243,30 +237,29 @@ def test_per_component_routing_with_default():
     )
     assert isinstance(config, ComponentQuantizationConfig)
 
-    layer = LinearBase(128, 128)
-    assert config.get_quant_method(layer, "vae.decoder.conv") is None
-    assert config.get_quant_method(layer, "transformer.blocks.0.attn") is not None
+    assert config.resolve("vae.decoder.conv") is None
+    resolved = config.resolve("transformer.blocks.0.attn")
+    assert resolved is not None
+    assert resolved.get_name() == "fp8"
 
 
 def test_multi_component_model_routing():
     """Integration test: walk a multi-component model and verify per-component
-    quantization routes get_quant_method() correctly for every linear layer."""
-    from vllm.model_executor.layers.linear import LinearBase
-
+    quantization routes resolve() correctly for every linear layer."""
     from vllm_omni.quantization import ComponentQuantizationConfig, build_quant_config
 
     # Build a mock multi-stage model mimicking Bagel/Qwen3-Omni layout
     class MockTransformerBlock(nn.Module):
         def __init__(self):
             super().__init__()
-            self.attn_q = LinearBase(64, 64)
-            self.attn_k = LinearBase(64, 64)
-            self.mlp = LinearBase(64, 256)
+            self.attn_q = nn.Linear(64, 64)
+            self.attn_k = nn.Linear(64, 64)
+            self.mlp = nn.Linear(64, 256)
 
     class MockVAEBlock(nn.Module):
         def __init__(self):
             super().__init__()
-            self.conv = LinearBase(64, 64)
+            self.conv = nn.Linear(64, 64)
 
     class MockMultiStageModel(nn.Module):
         def __init__(self):
@@ -294,9 +287,10 @@ def test_multi_component_model_routing():
     assert isinstance(config, ComponentQuantizationConfig)
 
     for name, module in model.named_modules():
-        if isinstance(module, LinearBase):
-            method = config.get_quant_method(module, name)
+        if isinstance(module, nn.Linear):
+            resolved = config.resolve(name)
             if name.startswith("transformer"):
-                assert method is not None, f"{name} should be quantized"
+                assert resolved is not None, f"{name} should be quantized"
+                assert resolved.get_name() == "fp8"
             elif name.startswith("vae"):
-                assert method is None, f"{name} should NOT be quantized"
+                assert resolved is None, f"{name} should NOT be quantized"

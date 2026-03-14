@@ -56,13 +56,12 @@ def _build_single(method: str, **kwargs: Any) -> QuantizationConfig:
 
     config_cls = get_quantization_config(method)
 
-    config_kwargs = kwargs if kwargs else {}
     try:
-        return config_cls.from_config(config_kwargs)
-    except (TypeError, KeyError, ValueError):
+        return config_cls(**kwargs)
+    except TypeError:
         sig = inspect.signature(config_cls.__init__)
         raise TypeError(
-            f"Cannot instantiate {config_cls.__name__} with kwargs {config_kwargs}. Expected signature: {sig}"
+            f"Cannot instantiate {config_cls.__name__} with kwargs {kwargs}. Expected signature: {sig}"
         ) from None
 
 
@@ -130,6 +129,8 @@ def build_quant_config(
         return spec
 
     if isinstance(spec, str):
+        if spec.lower() == "none":
+            return None
         logger.info("Building quantization config: %s", spec)
         return _build_single(spec, **kwargs)
 
