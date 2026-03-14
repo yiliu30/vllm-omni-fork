@@ -126,7 +126,7 @@ def main():
         }
     )
     if args.quantization:
-        omni_kwargs["quantization"] = args.quantization
+        omni_kwargs["quantization_config"] = args.quantization
 
     omni = Omni(model=model_name, **omni_kwargs)
 

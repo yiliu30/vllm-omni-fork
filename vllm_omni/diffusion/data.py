@@ -594,6 +594,13 @@ class OmniDiffusionConfig:
                 kwargs["lora_scale"] = kwargs["static_lora_scale"]
             kwargs.pop("static_lora_scale", None)
 
+        # Backwards-compatibility: map "quantization" to "quantization_config"
+        # so callers using the old field name still work.
+        if "quantization" in kwargs and "quantization_config" not in kwargs:
+            kwargs["quantization_config"] = kwargs.pop("quantization")
+        else:
+            kwargs.pop("quantization", None)
+
         # Check environment variable as fallback for cache_backend
         # Support both old DIFFUSION_CACHE_ADAPTER and new DIFFUSION_CACHE_BACKEND for backwards compatibility
         if "cache_backend" not in kwargs:
