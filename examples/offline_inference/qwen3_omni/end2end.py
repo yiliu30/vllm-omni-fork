@@ -333,11 +333,14 @@ def main(args):
         repetition_penalty=1.1,
     )
 
-    sampling_params_list = [
+    all_sampling_params = [
         thinker_sampling_params,
         talker_sampling_params,  # code predictor is integrated into talker for Qwen3 Omni
         code2wav_sampling_params,
     ]
+    # Match sampling params to the number of configured stages
+    num_stages = len(omni_llm.stage_list)
+    sampling_params_list = all_sampling_params[:num_stages]
 
     if args.txt_prompts is None:
         prompts = [query_result.inputs for _ in range(args.num_prompts)]
