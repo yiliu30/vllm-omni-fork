@@ -2,12 +2,12 @@
 # Total memory budget: ~64GB (simulating A100-64GB / L40S deployment)
 # Tested on H200 141GB with constrained gpu_memory_utilization
 #
-# Memory breakdown:
-#   Thinker (FP8):  ~31.4 GiB weights + ~10 GiB KV cache = ~42 GiB
-#   Talker (BF16):  ~6 GiB weights + ~3 GiB KV cache     = ~9 GiB
-#   Code2Wav:       ~1 GiB weights + ~2 GiB runtime       = ~3 GiB
+# Memory breakdown (on H200 141GB):
+#   Thinker (FP8):  ~31.4 GiB weights + ~10 GiB KV cache = ~42 GiB (0.30)
+#   Talker (BF16):  ~8.5 GiB weights + ~4 GiB KV cache   = ~13 GiB (0.09)
+#   Code2Wav:       ~1 GiB weights + ~2 GiB runtime       = ~3 GiB  (0.02)
 #   CUDA overhead:  ~5 GiB
-#   Total:          ~59 GiB (within 64GB budget)
+#   Total:          ~63 GiB (within 64GB budget)
 
 async_chunk: false
 stage_args:
@@ -55,12 +55,13 @@ stage_args:
       model_arch: Qwen3OmniMoeForConditionalGeneration
       worker_type: ar
       scheduler_cls: vllm_omni.core.sched.omni_ar_scheduler.OmniARScheduler
-      gpu_memory_utilization: 0.065  # ~9 GiB on H200
+      gpu_memory_utilization: 0.09  # ~12.7 GiB on H200 (8.5 weights + 4.2 KV cache)
       enforce_eager: true
       trust_remote_code: true
       engine_output_type: latent
       enable_prefix_caching: false
       max_num_batched_tokens: 4096
+      max_model_len: 4096
       distributed_executor_backend: "mp"
       hf_config_name: talker_config
     engine_input_source: [0]
