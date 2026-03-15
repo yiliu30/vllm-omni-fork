@@ -243,6 +243,71 @@ def test_per_component_routing_with_default():
     assert resolved.get_name() == "fp8"
 
 
+def test_omni_convertor_thinker_finds_text_config_quant():
+    """Thinker stage should discover quantization_config from
+    thinker_config.text_config (correct relative prefixes)."""
+    from types import SimpleNamespace
+
+    from vllm_omni.config.model import OmniModelArchConfigConvertor
+
+    text_config = SimpleNamespace(
+        quantization_config={
+            "quant_method": "modelopt",
+            "quant_algo": "FP8",
+            "ignore": ["lm_head", "model.layers.0.mlp.gate"],
+        },
+        model_type="qwen3_moe",
+    )
+    thinker_config = SimpleNamespace(text_config=text_config)
+    hf_config = SimpleNamespace(
+        thinker_config=thinker_config,
+        talker_config=SimpleNamespace(text_config=SimpleNamespace()),
+        model_type="qwen3_omni_moe",
+    )
+
+    convertor = OmniModelArchConfigConvertor(hf_config, text_config, stage_config_name="thinker_config")
+    quant_cfg = convertor.get_quantization_config()
+
+    assert quant_cfg is not None
+    assert quant_cfg["quant_method"] == "modelopt"
+    assert "lm_head" in quant_cfg["ignore"]
+
+
+def test_omni_convertor_talker_returns_none():
+    """Talker stage should get no quantization config when its text_config
+    has no quantization_config (talker weights are BF16)."""
+    from types import SimpleNamespace
+
+    from vllm_omni.config.model import OmniModelArchConfigConvertor
+
+    talker_text_config = SimpleNamespace(model_type="qwen3_omni_moe_talker")
+    talker_config = SimpleNamespace(text_config=talker_text_config)
+    hf_config = SimpleNamespace(
+        talker_config=talker_config,
+        model_type="qwen3_omni_moe",
+    )
+
+    convertor = OmniModelArchConfigConvertor(hf_config, talker_text_config, stage_config_name="talker_config")
+    quant_cfg = convertor.get_quantization_config()
+
+    assert quant_cfg is None
+
+
+def test_omni_convertor_no_stage_name_falls_back():
+    """Without stage_config_name, should fall back to base behavior."""
+    from types import SimpleNamespace
+
+    from vllm_omni.config.model import OmniModelArchConfigConvertor
+
+    hf_config = SimpleNamespace(model_type="qwen3_omni_moe")
+    text_config = SimpleNamespace()
+
+    convertor = OmniModelArchConfigConvertor(hf_config, text_config)
+    quant_cfg = convertor.get_quantization_config()
+
+    assert quant_cfg is None
+
+
 def test_multi_component_model_routing():
     """Integration test: walk a multi-component model and verify per-component
     quantization routes resolve() correctly for every linear layer."""

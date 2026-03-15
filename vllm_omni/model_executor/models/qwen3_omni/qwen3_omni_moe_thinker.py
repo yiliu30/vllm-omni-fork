@@ -852,7 +852,21 @@ class Qwen3OmniMoeThinkerForConditionalGeneration(
         self.multimodal_config = multimodal_config
         self.quant_config = quant_config
 
-        visual_quant_config = quant_config
+        # For pre-quantized checkpoints (e.g. modelopt FP8), the quant config
+        # applies to the language model only — audio_tower and visual remain
+        # unquantized.  Auto-scope flat quant configs to language_model.
+        if quant_config is not None and not isinstance(quant_config, ComponentQuantizationConfig):
+            quant_config = ComponentQuantizationConfig(
+                component_configs={"language_model": quant_config},
+                default_config=None,
+            )
+            vllm_config = replace(vllm_config, quant_config=quant_config)
+            logger.debug(
+                "Auto-scoped %s quant to language_model only",
+                quant_config.resolve("language_model").get_name(),
+            )
+
+        visual_quant_config = None
         language_quant_config = quant_config
         if isinstance(quant_config, ComponentQuantizationConfig):
             visual_quant_config = quant_config.resolve("visual")
