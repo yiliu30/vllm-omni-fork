@@ -80,11 +80,11 @@ def run_benchmark(model_path, stage_config, label, seed=42):
     outputs = []
     total_tokens = 0
     for stage_output in results:
-        for req_output in stage_output.request_outputs:
-            text = req_output.outputs[0].text
-            n_tokens = len(req_output.outputs[0].token_ids)
-            total_tokens += n_tokens
-            outputs.append(text)
+        req_output = stage_output.request_output
+        text = req_output.outputs[0].text
+        n_tokens = len(req_output.outputs[0].token_ids)
+        total_tokens += n_tokens
+        outputs.append(text)
 
     peak_mem = get_gpu_memory_mb()
     tok_per_sec = total_tokens / gen_time if gen_time > 0 else 0
