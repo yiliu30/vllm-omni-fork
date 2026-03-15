@@ -11,7 +11,7 @@ stage_args:
       model_arch: Qwen3OmniMoeForConditionalGeneration
       worker_type: ar
       scheduler_cls: vllm_omni.core.sched.omni_ar_scheduler.OmniARScheduler
-      gpu_memory_utilization: 0.95
+      gpu_memory_utilization: 0.45  # ~64GB on H200 (141GB)
       enforce_eager: true
       trust_remote_code: true
       engine_output_type: latent
