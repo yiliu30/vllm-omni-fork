@@ -197,7 +197,7 @@ def test_integration_per_component():
 def test_supported_methods_includes_vllm():
     from vllm_omni.quantization import SUPPORTED_QUANTIZATION_METHODS
 
-    for method in ["fp8", "gguf", "awq", "gptq", "bitsandbytes"]:
+    for method in ["fp8", "gguf", "awq", "gptq", "bitsandbytes", "modelopt", "modelopt_fp4"]:
         assert method in SUPPORTED_QUANTIZATION_METHODS, f"{method} missing"
 
 
@@ -243,9 +243,14 @@ def test_per_component_routing_with_default():
     assert resolved.get_name() == "fp8"
 
 
-def test_omni_convertor_thinker_finds_text_config_quant():
+@pytest.mark.parametrize(
+    "quant_algo",
+    ["FP8", "NVFP4"],
+    ids=["modelopt_fp8", "modelopt_nvfp4"],
+)
+def test_omni_convertor_thinker_finds_text_config_quant(quant_algo):
     """Thinker stage should discover quantization_config from
-    thinker_config.text_config (correct relative prefixes)."""
+    thinker_config.text_config for both FP8 and NVFP4 modelopt checkpoints."""
     from types import SimpleNamespace
 
     from vllm_omni.config.model import OmniModelArchConfigConvertor
@@ -253,7 +258,7 @@ def test_omni_convertor_thinker_finds_text_config_quant():
     text_config = SimpleNamespace(
         quantization_config={
             "quant_method": "modelopt",
-            "quant_algo": "FP8",
+            "quant_algo": quant_algo,
             "ignore": ["lm_head", "model.layers.0.mlp.gate"],
         },
         model_type="qwen3_moe",

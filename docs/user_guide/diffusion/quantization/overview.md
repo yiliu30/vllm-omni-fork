@@ -14,6 +14,19 @@ vLLM-Omni supports quantization of diffusion model components to reduce memory u
 | BitsAndBytes | — | BitsAndBytes (INT8/NF4) | SM 75 |
 | ModelOpt | — | NVIDIA ModelOpt (INT4, FP8, NVFP4, MXFP4) | Varies |
 
+### Pre-quantized LLM Checkpoints (Multi-stage Models)
+
+For multi-stage models like Qwen3-Omni, the unified quantization framework auto-detects
+pre-quantized checkpoints via `quantization_config` in the HF config. Supported formats:
+
+| Format | `quant_algo` | Hardware | Example |
+|--------|-------------|----------|---------|
+| ModelOpt FP8 | `FP8` | Ada/Hopper (SM 89+) | `asdazd/Qwen3-Omni-30B-A3B-Instruct_modelopt_FP8` |
+| ModelOpt NVFP4 | `NVFP4` | Blackwell (SM 100+) | NVFP4 quantized checkpoint |
+
+Quantization is automatically scoped to the thinker's `language_model` — audio encoder,
+vision encoder, talker, and code2wav remain in BF16.
+
 ## Quantization Scope
 
 When `--quantization fp8` is enabled, the following components are quantized:
@@ -29,11 +42,12 @@ When `--quantization fp8` is enabled, the following components are quantized:
 
 ## Device Compatibility for FP8
 
-| Device | Example Hardware | FP8 Mode |
-|--------|-----------------|----------|
-| Ada/Hopper GPU (SM 89+) | RTX 4090, H100, H200 | Full W8A8 with native hardware (DiT) + weight storage (encoder/VAE) |
-| Turing/Ampere GPU (SM 75-86) | RTX 3090, A100 | Weight-only via Marlin kernel (DiT) + weight storage (encoder/VAE) |
-| Ascend NPU | Atlas 800T A2 (910B) | Not yet supported |
+| Device | Example Hardware | FP8 | NVFP4 |
+|--------|-----------------|-----|-------|
+| Blackwell GPU (SM 100+) | RTX 5090, B100, B200 | Yes | Yes (native FP4 HW) |
+| Ada/Hopper GPU (SM 89+) | RTX 4090, H100, H200 | Yes (W8A8 native) | No |
+| Turing/Ampere GPU (SM 75-86) | RTX 3090, A100 | Yes (weight-only Marlin) | No |
+| Ascend NPU | Atlas 800T A2 (910B) | Not yet supported | No |
 
 Kernel selection is automatic on CUDA GPUs.
 
