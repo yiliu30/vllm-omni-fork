@@ -69,9 +69,7 @@ def _generate_single_stage_image(
     try:
         torch.cuda.reset_peak_memory_stats()
 
-        generator = torch.Generator(
-            device=current_omni_platform.device_type
-        ).manual_seed(seed)
+        generator = torch.Generator(device=current_omni_platform.device_type).manual_seed(seed)
         outputs = omni.generate(
             "a photo of a cat sitting on a laptop keyboard",
             OmniDiffusionSamplingParams(
@@ -108,9 +106,7 @@ def _generate_bagel_image(
 
     Returns (generated_image, peak_memory_gib).
     """
-    config_path = str(
-        Path(__file__).parent / "stage_configs" / "bagel_sharedmemory_ci.yaml"
-    )
+    config_path = str(Path(__file__).parent / "stage_configs" / "bagel_sharedmemory_ci.yaml")
     omni_kwargs: dict[str, Any] = {
         "model": "ByteDance-Seed/BAGEL-7B-MoT",
         "stage_configs_path": config_path,
@@ -157,9 +153,7 @@ def _generate_bagel_image(
                     break
 
         assert generated_image is not None, "No images generated from BAGEL"
-        assert generated_image.size == (1024, 1024), (
-            f"Expected 1024x1024, got {generated_image.size}"
-        )
+        assert generated_image.size == (1024, 1024), f"Expected 1024x1024, got {generated_image.size}"
 
         # Check LLM stage output — should have finish_reason=stop (not length)
         for req_output in omni_outputs:
@@ -209,9 +203,7 @@ def test_single_stage_zimage_fp8_uses_less_memory():
 
     print(f"Z-Image BF16 peak memory: {mem_bf16:.2f} GiB")
     print(f"Z-Image FP8 peak memory:  {mem_fp8:.2f} GiB")
-    assert mem_fp8 < mem_bf16, (
-        f"FP8 ({mem_fp8:.2f} GiB) should use less memory than BF16 ({mem_bf16:.2f} GiB)"
-    )
+    assert mem_fp8 < mem_bf16, f"FP8 ({mem_fp8:.2f} GiB) should use less memory than BF16 ({mem_bf16:.2f} GiB)"
 
 
 @hardware_test(res={"cuda": "L4"})
@@ -265,9 +257,7 @@ def test_single_stage_flux_fp8_uses_less_memory():
 
     print(f"FLUX BF16 peak memory: {mem_bf16:.2f} GiB")
     print(f"FLUX FP8 peak memory:  {mem_fp8:.2f} GiB")
-    assert mem_fp8 < mem_bf16, (
-        f"FP8 ({mem_fp8:.2f} GiB) should use less memory than BF16 ({mem_bf16:.2f} GiB)"
-    )
+    assert mem_fp8 < mem_bf16, f"FP8 ({mem_fp8:.2f} GiB) should use less memory than BF16 ({mem_bf16:.2f} GiB)"
 
 
 # ─── Multi-stage model tests (BAGEL) ─────────────────────────────────────────
@@ -302,9 +292,7 @@ def test_quantization_key_maps_to_quantization_config():
     in OmniDiffusionConfig.from_kwargs for backwards compatibility."""
     from vllm_omni.diffusion.data import OmniDiffusionConfig
 
-    config = OmniDiffusionConfig.from_kwargs(
-        model="test", quantization="fp8"
-    )
+    config = OmniDiffusionConfig.from_kwargs(model="test", quantization="fp8")
     assert config.quantization_config is not None
     assert config.quantization_config.get_name() == "fp8"
 

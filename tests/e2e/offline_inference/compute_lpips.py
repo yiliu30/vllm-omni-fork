@@ -30,11 +30,13 @@ def compute_lpips(img_baseline, img_quantized, net="alex"):
     if torch.cuda.is_available():
         loss_fn = loss_fn.cuda()
 
-    transform = transforms.Compose([
-        transforms.Resize((256, 256)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
-    ])
+    transform = transforms.Compose(
+        [
+            transforms.Resize((256, 256)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+        ]
+    )
 
     t_bl = transform(img_baseline.convert("RGB")).unsqueeze(0)
     t_qt = transform(img_quantized.convert("RGB")).unsqueeze(0)
@@ -47,12 +49,13 @@ def compute_lpips(img_baseline, img_quantized, net="alex"):
 
 def main():
     parser = argparse.ArgumentParser(description="Compute LPIPS for BF16 vs FP8 image pairs.")
-    parser.add_argument("--image-dir", type=str, required=True,
-                        help="Directory containing *_bf16.png and *_fp8.png pairs.")
-    parser.add_argument("--threshold", type=float, default=0.1,
-                        help="LPIPS threshold for PASS/FAIL (default: 0.1).")
-    parser.add_argument("--net", type=str, default="alex", choices=["alex", "vgg", "squeeze"],
-                        help="LPIPS backbone (default: alex).")
+    parser.add_argument(
+        "--image-dir", type=str, required=True, help="Directory containing *_bf16.png and *_fp8.png pairs."
+    )
+    parser.add_argument("--threshold", type=float, default=0.1, help="LPIPS threshold for PASS/FAIL (default: 0.1).")
+    parser.add_argument(
+        "--net", type=str, default="alex", choices=["alex", "vgg", "squeeze"], help="LPIPS backbone (default: alex)."
+    )
     args = parser.parse_args()
 
     from PIL import Image
@@ -85,9 +88,9 @@ def main():
         status = "PASS" if score < args.threshold else "FAIL"
         if score >= args.threshold:
             all_pass = False
-        results.append((model_name, score, status,
-                         f"{img_bl.width}x{img_bl.height}",
-                         f"{img_fp8.width}x{img_fp8.height}"))
+        results.append(
+            (model_name, score, status, f"{img_bl.width}x{img_bl.height}", f"{img_fp8.width}x{img_fp8.height}")
+        )
 
     # Print results table
     print("")
@@ -95,7 +98,7 @@ def main():
     print(f"  LPIPS Results (net={args.net}, threshold={args.threshold})")
     print("=" * 70)
     print(f"  {'Model':<20} {'LPIPS':>8} {'Status':>8}  {'BF16 size':>12} {'FP8 size':>12}")
-    print(f"  {'-'*20} {'-'*8} {'-'*8}  {'-'*12} {'-'*12}")
+    print(f"  {'-' * 20} {'-' * 8} {'-' * 8}  {'-' * 12} {'-' * 12}")
     for model_name, score, status, sz_bl, sz_fp8 in results:
         print(f"  {model_name:<20} {score:>8.4f} {status:>8}  {sz_bl:>12} {sz_fp8:>12}")
     print("")
