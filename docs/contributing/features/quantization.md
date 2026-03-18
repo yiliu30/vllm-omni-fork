@@ -43,7 +43,6 @@ Key classes:
 |-------|----------|---------|
 | `build_quant_config` | `vllm_omni/quantization/__init__.py` | Build quantization config from string/dict/per-component spec |
 | `ComponentQuantizationConfig` | `vllm_omni/quantization/component_config.py` | Per-component routing by layer prefix |
-| `validate_quant_config` | `vllm_omni/quantization/validation.py` | Validate config against GPU capability and dtype |
 
 **2. FP8 Weight Storage via Hooks (for text encoder and VAE)**
 
