@@ -29,142 +29,14 @@ if TYPE_CHECKING:
 
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.data import OmniDiffusionConfig
+from vllm_omni.diffusion.layers.adalayernorm import (
+    AdaLayerNormContinuous,
+    AdaLayerNormZero,
+    AdaLayerNormZeroSingle,
+)
 from vllm_omni.diffusion.layers.rope import RotaryEmbedding, apply_rope_to_qk
 
-if TYPE_CHECKING:
-    from vllm.model_executor.layers.quantization.base_config import QuantizationConfig
-
 logger = init_logger(__name__)
-
-
-class FluxAdaLayerNormZero(nn.Module):
-    r"""
-    Adaptive layer norm zero (adaLN-Zero) for Flux, using ReplicatedLinear
-    to support quantization.
-
-    Parameters:
-        embedding_dim (`int`): The size of each embedding vector.
-        quant_config: Quantization configuration for the linear layer.
-        prefix (`str`): Prefix for parameter naming.
-    """
-
-    def __init__(
-        self,
-        embedding_dim: int,
-        bias: bool = True,
-        quant_config: "QuantizationConfig | None" = None,
-        prefix: str = "",
-    ):
-        super().__init__()
-        self.emb = None
-        self.silu = nn.SiLU()
-        self.linear = ReplicatedLinear(
-            embedding_dim,
-            6 * embedding_dim,
-            bias=bias,
-            return_bias=False,
-            quant_config=quant_config,
-            prefix=f"{prefix}.linear",
-        )
-        self.norm = nn.LayerNorm(embedding_dim, elementwise_affine=False, eps=1e-6)
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        emb: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        emb = self.linear(self.silu(emb))
-        if isinstance(emb, tuple):
-            emb = emb[0]
-        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = emb.chunk(6, dim=1)
-        x = self.norm(x) * (1 + scale_msa[:, None]) + shift_msa[:, None]
-        return x, gate_msa, shift_mlp, scale_mlp, gate_mlp
-
-
-class FluxAdaLayerNormZeroSingle(nn.Module):
-    r"""
-    Adaptive layer norm zero (adaLN-Zero) for Flux single-stream blocks,
-    using ReplicatedLinear to support quantization.
-
-    Parameters:
-        embedding_dim (`int`): The size of each embedding vector.
-        quant_config: Quantization configuration for the linear layer.
-        prefix (`str`): Prefix for parameter naming.
-    """
-
-    def __init__(
-        self,
-        embedding_dim: int,
-        bias: bool = True,
-        quant_config: "QuantizationConfig | None" = None,
-        prefix: str = "",
-    ):
-        super().__init__()
-        self.silu = nn.SiLU()
-        self.linear = ReplicatedLinear(
-            embedding_dim,
-            3 * embedding_dim,
-            bias=bias,
-            return_bias=False,
-            quant_config=quant_config,
-            prefix=f"{prefix}.linear",
-        )
-        self.norm = nn.LayerNorm(embedding_dim, elementwise_affine=False, eps=1e-6)
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        emb: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        emb = self.linear(self.silu(emb))
-        if isinstance(emb, tuple):
-            emb = emb[0]
-        shift_msa, scale_msa, gate_msa = emb.chunk(3, dim=1)
-        x = self.norm(x) * (1 + scale_msa[:, None]) + shift_msa[:, None]
-        return x, gate_msa
-
-
-class FluxAdaLayerNormContinuous(nn.Module):
-    r"""
-    Adaptive normalization layer with a norm layer (layer_norm) for Flux,
-    using ReplicatedLinear to support quantization.
-
-    Parameters:
-        embedding_dim (`int`): Embedding dimension to use during projection.
-        conditioning_embedding_dim (`int`): Dimension of the input condition.
-        quant_config: Quantization configuration for the linear layer.
-        prefix (`str`): Prefix for parameter naming.
-    """
-
-    def __init__(
-        self,
-        embedding_dim: int,
-        conditioning_embedding_dim: int,
-        elementwise_affine: bool = False,
-        eps: float = 1e-6,
-        bias: bool = True,
-        quant_config: "QuantizationConfig | None" = None,
-        prefix: str = "",
-    ):
-        super().__init__()
-        self.silu = nn.SiLU()
-        self.linear = ReplicatedLinear(
-            conditioning_embedding_dim,
-            embedding_dim * 2,
-            bias=bias,
-            return_bias=False,
-            quant_config=quant_config,
-            prefix=f"{prefix}.linear",
-        )
-        self.norm = nn.LayerNorm(embedding_dim, eps=eps, elementwise_affine=elementwise_affine)
-
-    def forward(self, x: torch.Tensor, conditioning_embedding: torch.Tensor) -> torch.Tensor:
-        emb = self.linear(self.silu(conditioning_embedding).to(x.dtype))
-        if isinstance(emb, tuple):
-            emb = emb[0]
-        scale, shift = torch.chunk(emb, 2, dim=1)
-        x = self.norm(x) * (1 + scale)[:, None, :] + shift[:, None, :]
-        return x
 
 
 class ColumnParallelApproxGELU(nn.Module):
@@ -405,8 +277,8 @@ class FluxTransformerBlock(nn.Module):
         prefix: str = "",
     ):
         super().__init__()
-        self.norm1 = FluxAdaLayerNormZero(dim, quant_config=quant_config, prefix=f"{prefix}.norm1")
-        self.norm1_context = FluxAdaLayerNormZero(dim, quant_config=quant_config, prefix=f"{prefix}.norm1_context")
+        self.norm1 = AdaLayerNormZero(dim, quant_config=quant_config, prefix=f"{prefix}.norm1")
+        self.norm1_context = AdaLayerNormZero(dim, quant_config=quant_config, prefix=f"{prefix}.norm1_context")
 
         self.attn = FluxAttention(
             query_dim=dim,
@@ -497,15 +369,23 @@ class FluxSingleTransformerBlock(nn.Module):
         super().__init__()
         self.mlp_hidden_dim = int(dim * mlp_ratio)
 
-        self.norm = FluxAdaLayerNormZeroSingle(dim, quant_config=quant_config, prefix=f"{prefix}.norm")
+        self.norm = AdaLayerNormZeroSingle(dim, quant_config=quant_config, prefix=f"{prefix}.norm")
         self.proj_mlp = ReplicatedLinear(
-            dim, self.mlp_hidden_dim, bias=True, return_bias=False, quant_config=quant_config,
-            prefix=f"{prefix}.proj_mlp"
+            dim,
+            self.mlp_hidden_dim,
+            bias=True,
+            return_bias=False,
+            quant_config=quant_config,
+            prefix=f"{prefix}.proj_mlp",
         )
         self.act_mlp = nn.GELU(approximate="tanh")
         self.proj_out = ReplicatedLinear(
-            dim + self.mlp_hidden_dim, dim, bias=True, return_bias=False, quant_config=quant_config,
-            prefix=f"{prefix}.proj_out"
+            dim + self.mlp_hidden_dim,
+            dim,
+            bias=True,
+            return_bias=False,
+            quant_config=quant_config,
+            prefix=f"{prefix}.proj_out",
         )
 
         self.attn = FluxAttention(
@@ -691,9 +571,13 @@ class FluxTransformer2DModel(nn.Module):
             ]
         )
 
-        self.norm_out = FluxAdaLayerNormContinuous(
-            self.inner_dim, self.inner_dim, elementwise_affine=False, eps=1e-6,
-            quant_config=quant_config, prefix="norm_out",
+        self.norm_out = AdaLayerNormContinuous(
+            self.inner_dim,
+            self.inner_dim,
+            elementwise_affine=False,
+            eps=1e-6,
+            quant_config=quant_config,
+            prefix="norm_out",
         )
         self.proj_out = nn.Linear(self.inner_dim, patch_size * patch_size * self.out_channels, bias=True)
 
