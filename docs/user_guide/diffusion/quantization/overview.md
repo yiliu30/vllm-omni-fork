@@ -22,7 +22,7 @@ pre-quantized checkpoints via `quantization_config` in the HF config. Supported 
 | Format | `quant_algo` | Hardware | Example |
 |--------|-------------|----------|---------|
 | ModelOpt FP8 | `FP8` | Ada/Hopper (SM 89+) | `asdazd/Qwen3-Omni-30B-A3B-Instruct_modelopt_FP8` |
-| ModelOpt NVFP4 | `NVFP4` | Blackwell (SM 100+) | NVFP4 quantized checkpoint |
+| ModelOpt NVFP4 | `NVFP4` | Blackwell (SM 100+) | `shunyang90/Qwen3-Omni-30B-A3B-Instruct-NVFP4` |
 
 Quantization is automatically scoped to the thinker's `language_model` — audio encoder,
 vision encoder, talker, and code2wav remain in BF16.
