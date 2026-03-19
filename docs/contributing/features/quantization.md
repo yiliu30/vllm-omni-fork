@@ -142,15 +142,26 @@ class YourFeedForward(nn.Module):
 
 Some layers degrade output quality when quantized. Common sensitive layers:
 
-| Layer | Why Sensitive | Typical Models |
-|-------|-------------|---------------|
-| `img_mlp` | Processes denoising latents with shifting dynamic range | Qwen-Image |
-| `proj_out` | Final output projection, small quantization errors amplified | Various |
+| Layer | Why Sensitive | Typical Models | Quant Methods Affected |
+|-------|-------------|---------------|----------------------|
+| `img_mlp` | Processes denoising latents with shifting dynamic range | Qwen-Image | FP8, Int8 |
+| `feed_forward` | FFN layers in DiT blocks, large dynamic range | Z-Image | Int8 |
+| `proj_out` | Final output projection, small quantization errors amplified | Various | FP8, Int8 |
+| `lm_head` | Output vocabulary projection, precision-critical | Omni (thinker) | NVFP4 |
+| `mlp.gate` | MoE router gates, routing decisions are precision-critical | MoE models | NVFP4 |
+
+**Quantization quality benchmarks** (LPIPS: lower = better, <0.01 imperceptible, >0.1 noticeable):
+
+| Model | Method | All Layers | With `ignored_layers` | Recommendation |
+|-------|--------|-----------|----------------------|----------------|
+| Qwen-Image-2512 | Int8 | LPIPS 0.0197 | 0.0027 (skip `img_mlp`) | Skip `img_mlp` |
+| Z-Image-Turbo | Int8 | LPIPS 0.1597 | 0.0290 (skip `feed_forward`) | Skip `feed_forward` |
+| Z-Image-Turbo | FP8 | LPIPS ~0.005 | — | All layers OK |
 
 To identify sensitive layers for a new model:
 
 1. Run inference with all layers quantized
-2. Compare output quality with BF16 baseline
+2. Compare output quality with BF16 baseline using LPIPS (see `benchmarks/diffusion/quantization_quality.py`)
 3. Selectively disable quantization per layer (via `ignored_layers`) until quality matches
 4. Document the recommended `ignored_layers` in the model's supported models table
 
