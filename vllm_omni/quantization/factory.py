@@ -34,8 +34,16 @@ def _build_gguf(**kw: Any) -> QuantizationConfig:
     return DiffusionGGUFConfig(**kw)
 
 
+def _build_int8(**kw: Any) -> QuantizationConfig:
+    """Lazy import for Int8 diffusion config (supports CUDA + NPU)."""
+    from vllm_omni.diffusion.quantization.int8 import DiffusionInt8Config
+
+    return DiffusionInt8Config(**kw)
+
+
 _OVERRIDES: dict[str, Callable[..., QuantizationConfig]] = {
     "gguf": _build_gguf,
+    "int8": _build_int8,
 }
 
 SUPPORTED_QUANTIZATION_METHODS: list[str] = list(dict.fromkeys(QUANTIZATION_METHODS + list(_OVERRIDES.keys())))
