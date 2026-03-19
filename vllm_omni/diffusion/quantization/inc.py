@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""GPTQ quantization config for diffusion transformers."""
+"""INC quantization config for diffusion transformers."""
 
 from typing import Any
 
@@ -18,11 +18,7 @@ class DiffusionINCConfig(DiffusionQuantizationConfig):
     This implementation supports:
         - 4-bit weight quantization (w4a16) - recommended for diffusion models
         - Multiple group sizes for fine-grained quantization
-        - Compatibility with GPTQ-quantized checkpoints from AutoGPTQ
-
-    Device Compatibility:
-        - Requires CUDA compute capability 6.0+
-        - Optimized for modern GPUs with tensor cores
+        - Compatibility with quantized checkpoints from auto-round
 
     Args:
         weight_bits: Number of bits for weight quantization (4 recommended)
@@ -33,7 +29,7 @@ class DiffusionINCConfig(DiffusionQuantizationConfig):
         ignored_layers: List of layer name patterns to skip quantization
     """
 
-    # Tight coupling with vLLM's GPTQMarlinConfig - delegates get_name() and get_min_capability()
+    # Tight coupling with vLLM's INCConfig - delegates get_name() and get_min_capability()
     quant_config_cls = INCConfig
 
     def __init__(
@@ -48,7 +44,7 @@ class DiffusionINCConfig(DiffusionQuantizationConfig):
         backend: str = "auto",
         **kwargs,
     ):
-        # Create underlying vLLM GPTQ config
+        # Create underlying vLLM INC config
         vllm_inc_quant_config = INCConfig(
             weight_bits=bits,
             group_size=group_size,
@@ -60,4 +56,3 @@ class DiffusionINCConfig(DiffusionQuantizationConfig):
             backend=backend,
         )
         self._vllm_config = vllm_inc_quant_config
-        # self._vllm_config.modules_in_block_to_quantize = None
