@@ -6,7 +6,7 @@ import os
 import random
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import torch
 from pydantic import model_validator
@@ -19,12 +19,6 @@ from vllm_omni.diffusion.quantization import (
     get_diffusion_quant_config,
 )
 from vllm_omni.diffusion.utils.network_utils import is_port_available
-
-if TYPE_CHECKING:
-    from vllm_omni.diffusion.quantization import DiffusionQuantizationConfig
-
-# Import after TYPE_CHECKING to avoid circular imports at runtime
-# The actual import is deferred to __post_init__ to avoid import order issues
 
 logger = init_logger(__name__)
 
@@ -173,15 +167,33 @@ class DiffusionParallelConfig:
 
 @dataclass
 class TransformerConfig:
-    """Container for raw transformer configuration dictionaries."""
+    """Container for raw transformer configuration dictionaries.
+
+    When constructed via ``from_dict``, any ``quantization_config`` section
+    embedded in the dict is automatically resolved into ``quant_method`` and
+    ``quant_config`` fields, so downstream code never has to parse the raw
+    dict manually.
+    """
 
     params: dict[str, Any] = field(default_factory=dict)
+    quant_method: str | None = None
+    quant_config: "DiffusionQuantizationConfig | None" = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TransformerConfig":
         if not isinstance(data, dict):
             raise TypeError(f"Expected transformer config dict, got {type(data)!r}")
-        return cls(params=dict(data))
+        params = dict(data)  # copy to avoid mutating caller's dict
+
+        quant_method: str | None = None
+        quant_config: DiffusionQuantizationConfig | None = None
+        disk_qc = params.get("quantization_config")
+        if isinstance(disk_qc, dict) and "quant_method" in disk_qc:
+            quant_method = disk_qc["quant_method"]
+            kwargs = {k: v for k, v in disk_qc.items() if k != "quant_method"}
+            quant_config = get_diffusion_quant_config(quant_method, **kwargs)
+
+        return cls(params=params, quant_method=quant_method, quant_config=quant_config)
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.params)
@@ -513,29 +525,20 @@ class OmniDiffusionConfig:
         )
 
     def resolve_quantization(self):
-        """Resolve quantization config. Can be called after tf_model_config is loaded."""
-        # Try auto-detect from disk config
-        disk_quant_config = self.tf_model_config.get("quantization_config", None)
-        if (
-            disk_quant_config is not None
-            and isinstance(disk_quant_config, dict)
-            and "quant_method" in disk_quant_config
-        ):
-            self.quantization_config = disk_quant_config
-            quant_method = disk_quant_config.get("quant_method", None)
-            self.quantization = quant_method
-            disk_quant_config.pop("quant_method", None)
-            self.quantization_config = get_diffusion_quant_config(quant_method, **disk_quant_config)
-            # self.quantization_config._vllm_config.maybe_update_config(f"{self.model}/transformer/")
-            logger.info(f"Auto-detected quantization method '{self.quantization}' from model config")
+        """Resolve quantization config from tf_model_config or user-supplied settings.
+
+        Path A: auto-detect from TransformerConfig (already resolved at from_dict time).
+        Path B: user-supplied quantization/quantization_config kwargs.
+        """
+        # Path A: auto-detect from TransformerConfig (already resolved at from_dict time)
+        if self.quantization_config is None and self.tf_model_config.quant_config is not None:
+            self.quantization_config = self.tf_model_config.quant_config
+            self.quantization = self.tf_model_config.quant_method
+            logger.info("Auto-detected quantization method '%s' from model config", self.quantization)
             return
 
-        # Convert quantization config (deferred import to avoid circular imports)
+        # Path B: user-supplied quantization/quantization_config
         if self.quantization is not None or self.quantization_config is not None:
-            from vllm_omni.diffusion.quantization import (
-                DiffusionQuantizationConfig,
-            )
-
             # Handle dict or DictConfig (from OmegaConf) - use Mapping for broader compatibility
             if isinstance(self.quantization_config, Mapping):
                 # Convert DictConfig to dict if needed (OmegaConf compatibility)
@@ -615,6 +618,17 @@ class OmniDiffusionConfig:
             self.max_cpu_loras = 1
         elif self.max_cpu_loras < 1:
             raise ValueError("max_cpu_loras must be >= 1 for diffusion LoRA")
+
+        # Resolve quantization config: handles both auto-detection from
+        # tf_model_config (Path A) and user-supplied kwargs (Path B).
+        self.resolve_quantization()
+
+    def __setattr__(self, name: str, value: object) -> None:
+        object.__setattr__(self, name, value)
+        # Auto-trigger quantization resolution when tf_model_config is reassigned
+        # after __post_init__ has already run (i.e. quantization field exists).
+        if name == "tf_model_config" and hasattr(self, "quantization"):
+            self.resolve_quantization()
 
     def update_multimodal_support(self) -> None:
         self.supports_multimodal_inputs = self.model_class_name in {"QwenImageEditPlusPipeline"}
