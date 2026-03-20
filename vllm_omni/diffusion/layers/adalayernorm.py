@@ -131,16 +131,6 @@ class AdaLayerNorm(CustomOp):
 
 
 class AdaLayerNormZero(nn.Module):
-    r"""
-    Adaptive layer norm zero (adaLN-Zero) using ReplicatedLinear
-    to support quantization.
-
-    Parameters:
-        embedding_dim (`int`): The size of each embedding vector.
-        quant_config: Quantization configuration for the linear layer.
-        prefix (`str`): Prefix for parameter naming.
-    """
-
     def __init__(
         self,
         embedding_dim: int,
@@ -175,16 +165,6 @@ class AdaLayerNormZero(nn.Module):
 
 
 class AdaLayerNormZeroSingle(nn.Module):
-    r"""
-    Adaptive layer norm zero (adaLN-Zero) for single-stream blocks,
-    using ReplicatedLinear to support quantization.
-
-    Parameters:
-        embedding_dim (`int`): The size of each embedding vector.
-        quant_config: Quantization configuration for the linear layer.
-        prefix (`str`): Prefix for parameter naming.
-    """
-
     def __init__(
         self,
         embedding_dim: int,
@@ -218,17 +198,6 @@ class AdaLayerNormZeroSingle(nn.Module):
 
 
 class AdaLayerNormContinuous(nn.Module):
-    r"""
-    Adaptive normalization layer with a norm layer (layer_norm),
-    using ReplicatedLinear to support quantization.
-
-    Parameters:
-        embedding_dim (`int`): Embedding dimension to use during projection.
-        conditioning_embedding_dim (`int`): Dimension of the input condition.
-        quant_config: Quantization configuration for the linear layer.
-        prefix (`str`): Prefix for parameter naming.
-    """
-
     def __init__(
         self,
         embedding_dim: int,
