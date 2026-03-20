@@ -30,6 +30,7 @@ from .base import DiffusionQuantizationConfig
 from .fp8 import DiffusionFp8Config
 from .gguf import DiffusionGgufConfig
 from .inc import DiffusionINCConfig
+from .int8 import DiffusionInt8Config
 
 if TYPE_CHECKING:
     from vllm.model_executor.layers.quantization.base_config import (
@@ -42,6 +43,7 @@ logger = init_logger(__name__)
 # To add a new method, create a new config class and register it here
 _QUANT_CONFIG_REGISTRY: dict[str, type[DiffusionQuantizationConfig]] = {
     "fp8": DiffusionFp8Config,
+    "int8": DiffusionInt8Config,
     "gguf": DiffusionGgufConfig,
     "auto-round": DiffusionINCConfig,  # auto-round is under the INC config
 }
@@ -112,6 +114,7 @@ def get_vllm_quant_config_for_layers(
 __all__ = [
     "DiffusionQuantizationConfig",
     "DiffusionFp8Config",
+    "DiffusionInt8Config",
     "DiffusionGgufConfig",
     "DiffusionINCConfig",
     "get_diffusion_quant_config",
