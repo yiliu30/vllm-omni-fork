@@ -316,6 +316,26 @@ class DiffusersPipelineLoader:
                 if needs_device_move:
                     module.to(module_device)
 
+    # Weight suffixes that quantization methods create in the model but are
+    # not present in unquantized checkpoints.  Missing weights whose names
+    # end with one of these suffixes are expected and harmless; any *other*
+    # missing weight is a real bug even for quantized models.
+    _QUANTIZED_WEIGHT_SUFFIXES: tuple[str, ...] = (
+        # GPTQ / AWQ / AutoRound
+        ".qweight",
+        ".g_idx",
+        ".scales",
+        ".qzeros",
+        # FP8
+        ".weight_scale",
+        ".weight_scale_inv",
+        ".input_scale",
+        # GGUF
+        ".qweight_type",
+        # INT8
+        # (weight_scale already covered above)
+    )
+
     def load_weights(self, model: nn.Module, od_config: OmniDiffusionConfig) -> None:
         weights_to_load = self._get_expected_parameter_names(model)
         loaded_weights = model.load_weights(self.get_all_weights(model))
@@ -332,15 +352,23 @@ class DiffusersPipelineLoader:
         if loaded_weights is not None:
             weights_not_loaded = weights_to_load - loaded_weights
             if weights_not_loaded:
-                if od_config.quantization is None:
-                    raise ValueError(f"Following weights were not initialized from checkpoint: {weights_not_loaded}")
+                # For quantized models, separate expected missing weights
+                # (quant-specific suffixes) from truly unexpected ones.
+                if od_config.quantization is not None:
+                    expected_missing = {w for w in weights_not_loaded if w.endswith(self._QUANTIZED_WEIGHT_SUFFIXES)}
+                    unexpected_missing = weights_not_loaded - expected_missing
+                    if expected_missing:
+                        logger.warning(
+                            "Following weights were not initialized from "
+                            "checkpoint (expected for quantized models): %s",
+                            expected_missing,
+                        )
+                    if unexpected_missing:
+                        raise ValueError(
+                            f"Following weights were not initialized from checkpoint: {unexpected_missing}"
+                        )
                 else:
-                    logger.warning(
-                        "Following weights were not initialized from "
-                        "checkpoint (this may be expected for "
-                        "quantized models): %s",
-                        weights_not_loaded,
-                    )
+                    raise ValueError(f"Following weights were not initialized from checkpoint: {weights_not_loaded}")
 
     def _is_gguf_quantization(self, od_config: OmniDiffusionConfig) -> bool:
         quant_config = od_config.quantization_config
