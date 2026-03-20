@@ -131,3 +131,90 @@ def test_adalayernorm_uses_replicated_linear():
 
     norm_continuous = AdaLayerNormContinuous(64, 64)
     assert isinstance(norm_continuous.linear, ReplicatedLinear)
+
+
+# ── Numerical equivalence tests against diffusers originals ──
+
+
+def _copy_weights(src_linear, dst_replicated_linear):
+    """Copy weights from nn.Linear to ReplicatedLinear for comparison."""
+    dst_replicated_linear.weight.data.copy_(src_linear.weight.data)
+    if src_linear.bias is not None and dst_replicated_linear.bias is not None:
+        dst_replicated_linear.bias.data.copy_(src_linear.bias.data)
+
+
+def test_adalayernorm_zero_matches_diffusers():
+    """Verify AdaLayerNormZero produces identical output to diffusers original."""
+    from diffusers.models.normalization import (
+        AdaLayerNormZero as DiffusersAdaLayerNormZero,
+    )
+
+    from vllm_omni.diffusion.layers.adalayernorm import AdaLayerNormZero
+
+    dim = 64
+    torch.manual_seed(42)
+    ours = AdaLayerNormZero(dim)
+    ref = DiffusersAdaLayerNormZero(dim)
+
+    # Copy weights: nn.Linear -> ReplicatedLinear
+    _copy_weights(ref.linear, ours.linear)
+
+    x = torch.randn(2, 4, dim)
+    emb = torch.randn(2, dim)
+
+    out_ours = ours(x, emb)
+    out_ref = ref(x, emb=emb)
+
+    for o, r in zip(out_ours, out_ref):
+        torch.testing.assert_close(o, r, atol=1e-5, rtol=1e-5)
+
+
+def test_adalayernorm_zero_single_matches_diffusers():
+    """Verify AdaLayerNormZeroSingle produces identical output to diffusers original."""
+    from diffusers.models.normalization import (
+        AdaLayerNormZeroSingle as DiffusersAdaLayerNormZeroSingle,
+    )
+
+    from vllm_omni.diffusion.layers.adalayernorm import AdaLayerNormZeroSingle
+
+    dim = 64
+    torch.manual_seed(42)
+    ours = AdaLayerNormZeroSingle(dim)
+    ref = DiffusersAdaLayerNormZeroSingle(dim)
+
+    _copy_weights(ref.linear, ours.linear)
+
+    x = torch.randn(2, 4, dim)
+    emb = torch.randn(2, dim)
+
+    out_ours = ours(x, emb)
+    out_ref = ref(x, emb=emb)
+
+    for o, r in zip(out_ours, out_ref):
+        torch.testing.assert_close(o, r, atol=1e-5, rtol=1e-5)
+
+
+def test_adalayernorm_continuous_matches_diffusers():
+    """Verify AdaLayerNormContinuous produces identical output to diffusers original."""
+    from diffusers.models.normalization import (
+        AdaLayerNormContinuous as DiffusersAdaLayerNormContinuous,
+    )
+
+    from vllm_omni.diffusion.layers.adalayernorm import AdaLayerNormContinuous
+
+    dim = 64
+    cond_dim = 64
+    torch.manual_seed(42)
+    # Match constructor args: diffusers defaults elementwise_affine=True, eps=1e-5
+    ours = AdaLayerNormContinuous(dim, cond_dim, elementwise_affine=False, eps=1e-6)
+    ref = DiffusersAdaLayerNormContinuous(dim, cond_dim, elementwise_affine=False, eps=1e-6)
+
+    _copy_weights(ref.linear, ours.linear)
+
+    x = torch.randn(2, 4, dim)
+    cond = torch.randn(2, cond_dim)
+
+    out_ours = ours(x, cond)
+    out_ref = ref(x, cond)
+
+    torch.testing.assert_close(out_ours, out_ref, atol=1e-5, rtol=1e-5)
