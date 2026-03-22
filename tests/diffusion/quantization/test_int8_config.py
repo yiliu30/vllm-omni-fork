@@ -61,8 +61,8 @@ def test_quantization_integration():
     """Test end-to-end quantization flow through OmniDiffusionConfig."""
     from vllm_omni.diffusion.data import OmniDiffusionConfig
 
-    # Test with quantization string only
-    config = OmniDiffusionConfig(model="test", quantization="int8")
+    # Test with quantization_config string
+    config = OmniDiffusionConfig(model="test", quantization_config="int8")
     assert config.quantization_config is not None
     assert config.quantization_config.get_name() == "int8"
 
@@ -89,20 +89,17 @@ def test_quantization_dict_not_mutated():
     assert original_dict == dict_copy
 
 
-def test_quantization_conflicting_methods_warning(caplog):
-    """Test warning when quantization and quantization_config['method'] conflict."""
-    import logging
-
+def test_quantization_config_string_and_dict_equivalent():
+    """Test that string and dict forms produce equivalent configs."""
     from vllm_omni.diffusion.data import OmniDiffusionConfig
 
-    with caplog.at_level(logging.WARNING):
-        config = OmniDiffusionConfig(
-            model="test",
-            quantization="int8",  # This should be overridden
-            quantization_config={"method": "int8", "activation_scheme": "dynamic"},
-        )
-    # No warning when methods match
-    assert config.quantization_config is not None
+    config_str = OmniDiffusionConfig(model="test", quantization_config="int8")
+    config_dict = OmniDiffusionConfig(
+        model="test",
+        quantization_config={"method": "int8", "activation_scheme": "dynamic"},
+    )
+    assert config_str.quantization_config.get_name() == config_dict.quantization_config.get_name()
+    assert config_str.quantization_config.activation_scheme == config_dict.quantization_config.activation_scheme
 
 
 def test_get_quant_method(mocker: MockerFixture):
