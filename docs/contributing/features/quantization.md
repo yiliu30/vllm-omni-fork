@@ -246,7 +246,7 @@ Update the FP8 supported models table in `docs/user_guide/diffusion/quantization
 
 ## Testing
 
-### Basic Verification
+### Quick Verification
 
 ```python
 from vllm_omni import Omni
@@ -261,25 +261,154 @@ outputs = omni.generate(
 )
 ```
 
-### What to Verify
+### Quality Gate Test (LPIPS)
 
-1. **Model loads without errors** — Check logs for FP8 initialization messages
-2. **Output quality** — Compare FP8 outputs with BF16 baseline (should be visually identical)
-3. **Memory usage** — Verify memory reduction vs BF16 (expect ~50% savings on quantized components)
-4. **Sensitive layers** — If quality degrades, test with `ignored_layers` to identify which layers need BF16
+We provide a pytest-based quality gate at `tests/diffusion/quantization/test_quantization_quality.py`.
+It generates outputs with both BF16 and your quantized method using the same seed, computes
+[LPIPS](https://github.com/richzhang/PerceptualSimilarity) perceptual distance, and **fails if it
+exceeds a threshold**. This is the recommended way to validate that a quantization method does not
+unacceptably degrade output quality.
 
-### Example: Testing with Ignored Layers
+**Step 1: Add your test config** — edit `QUALITY_CONFIGS` in the test file:
 
 ```python
-# If quality degrades, try skipping sensitive layers
-omni = Omni(
-    model="your-model",
-    quantization_config={
-        "method": "fp8",
-        "ignored_layers": ["img_mlp"],  # Keep image MLPs in BF16
-    },
-)
+QualityTestConfig(
+    id="int8_z_image",              # pytest ID
+    model="Tongyi-MAI/Z-Image-Turbo",
+    quantization="int8",            # your quantization method
+    task="t2i",                     # "t2i" or "t2v"
+    prompt="a cup of coffee on a wooden table, morning light",
+    max_lpips=0.15,                 # fail threshold (see guide below)
+    num_inference_steps=20,
+),
 ```
+
+**Step 2: Run the test:**
+
+```bash
+# Install dependency
+pip install lpips
+
+# Run all quality tests
+pytest tests/diffusion/quantization/test_quantization_quality.py -v -m ""
+
+# Run only your method
+pytest tests/diffusion/quantization/test_quantization_quality.py -v -m "" -k "int8"
+
+# Run a specific model
+pytest tests/diffusion/quantization/test_quantization_quality.py -v -m "" -k "z_image"
+```
+
+**Step 3: Read the output:**
+
+```
+Quantization Quality: int8_z_image
+  Model:         Tongyi-MAI/Z-Image-Turbo
+  Method:        int8
+  LPIPS:         0.0290  (threshold: 0.15)
+  BF16 memory:   19.15 GiB
+  Quant memory:  14.80 GiB  (23% reduction)
+  Result:        PASS
+```
+
+**LPIPS threshold guide:**
+
+| LPIPS Range | Meaning | Recommendation |
+|-------------|---------|----------------|
+| < 0.01 | Imperceptible | Ideal — no visible difference |
+| 0.01 – 0.05 | Minor differences | Good — acceptable for most use cases |
+| 0.05 – 0.15 | Noticeable on close inspection | Acceptable with `ignored_layers` tuning |
+| 0.15 – 0.30 | Clearly visible | Investigate — likely needs `ignored_layers` |
+| > 0.30 | Significant degradation | Quantization method may not suit this model |
+
+!!! tip
+    If your test fails, don't raise the threshold — instead, identify sensitive layers and add
+    them to `ignored_layers` (see next section). Then re-run the test with the lower LPIPS.
+
+### Quality Benchmark (Detailed)
+
+For a full multi-prompt benchmark with Markdown output (suitable for PR descriptions), use the
+standalone benchmark script:
+
+```bash
+python benchmarks/diffusion/quantization_quality.py \
+    --model Tongyi-MAI/Z-Image-Turbo \
+    --quantization fp8 \
+    --prompts \
+        "a cup of coffee on the table" \
+        "an aerial view of a coral reef" \
+    --height 1024 --width 1024 \
+    --num-inference-steps 50 --seed 42
+```
+
+This generates BF16 and quantized outputs, computes per-prompt LPIPS, and prints a Markdown
+summary table ready to paste into your PR.
+
+### Identifying Sensitive Layers with `ignored_layers`
+
+Not all layers tolerate quantization equally. **`ignored_layers`** lets you keep specific layers
+in BF16 while quantizing everything else. This is critical for achieving good quality with
+aggressive quantization methods (Int8, NVFP4).
+
+**Why some layers are sensitive:**
+
+| Layer Type | Why Sensitive | Typical Impact |
+|------------|--------------|----------------|
+| `img_mlp` | Processes denoising latents with shifting dynamic range across timesteps. No built-in normalization to absorb quantization error. | Color shifts, blurriness |
+| `feed_forward` | FFN layers with large dynamic range in DiT blocks. | Artifacts, loss of detail |
+| `proj_out` | Final output projection — small errors get amplified since there are no subsequent layers to correct them. | Overall quality loss |
+| `lm_head` | Vocabulary projection in LLMs — precision-critical for token selection. | Garbage text output |
+| `mlp.gate` | MoE router gates — routing decisions are binary and precision-critical. | Wrong expert selection, quality collapse |
+
+**How to find sensitive layers for your model:**
+
+1. Run the quality gate test with all layers quantized:
+    ```bash
+    pytest tests/diffusion/quantization/test_quantization_quality.py -v -m "" -k "your_model"
+    ```
+
+2. If LPIPS exceeds your threshold, try skipping common sensitive layers one at a time:
+    ```python
+    QualityTestConfig(
+        id="fp8_your_model_skip_mlp",
+        model="your-org/Your-Model",
+        quantization="fp8",
+        task="t2i",
+        prompt="a cup of coffee on a wooden table",
+        max_lpips=0.05,
+    ),
+    ```
+
+    And in the test, modify the Omni call:
+    ```python
+    omni_qt = Omni(
+        model=config.model,
+        quantization_config={
+            "method": config.quantization,
+            "ignored_layers": ["img_mlp"],
+        },
+    )
+    ```
+
+3. Compare LPIPS with and without `ignored_layers` to isolate the problematic layers.
+
+4. Document the recommended `ignored_layers` in the supported models table.
+
+**Real-world examples:**
+
+| Model | Method | All Layers (LPIPS) | With `ignored_layers` | Which Layers to Skip |
+|-------|--------|-------------------|----------------------|---------------------|
+| Qwen-Image-2512 | Int8 | 0.0197 | 0.0027 | `img_mlp` |
+| Z-Image-Turbo | Int8 | 0.1597 | 0.0290 | `feed_forward` |
+| Z-Image-Turbo | FP8 | ~0.005 | — | None needed |
+
+### What to Verify (Checklist)
+
+1. **Model loads without errors** — Check logs for quantization initialization messages
+2. **Quality gate passes** — LPIPS within threshold vs BF16 baseline
+3. **Memory reduction** — Expect ~30-50% savings on quantized components
+4. **Sensitive layers identified** — Document which layers (if any) need `ignored_layers`
+5. **`ignored_layers` pattern works** — Verify that the layer name prefix matches your transformer's module names
 
 ---
 
