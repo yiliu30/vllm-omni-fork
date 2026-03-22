@@ -1,35 +1,54 @@
-# Quantization for Diffusion Models
+# Quantization
 
-vLLM-Omni supports quantization of diffusion model components to reduce memory usage and accelerate inference. This includes DiT, text encoders, and VAEs.
+vLLM-Omni provides a unified quantization framework that supports both diffusion models (DiT, text encoders, VAEs) and multi-stage omni models (e.g., Qwen3-Omni thinker). Quantization reduces memory usage and accelerates inference.
 
 ## Supported Methods
 
-| Method | Guide | Description | Min GPU |
-|--------|-------|-------------|---------|
-| FP8 | [FP8](fp8.md) | FP8 W8A8, dynamic or static | SM 89 (Ada) |
-| Int8 | [Int8](int8.md) | Int8 W8A8 | SM 89 (Ada) / Ascend NPU |
-| GGUF | [GGUF](gguf.md) | GGUF format, dequant+GEMM for N-D tensors | SM 60 |
-| AWQ | — | Activation-aware Weight Quantization (INT4) | SM 75 |
-| GPTQ | — | GPTQ (INT4/INT8) | SM 75 |
-| BitsAndBytes | — | BitsAndBytes (INT8/NF4) | SM 75 |
-| ModelOpt | — | NVIDIA ModelOpt (INT4, FP8, NVFP4, MXFP4) | Varies |
+### Diffusion Models
+
+| Method | Guide | Description | Tested Models | Min GPU |
+|--------|-------|-------------|---------------|---------|
+| FP8 | [FP8](fp8.md) | FP8 W8A8, dynamic or static | Z-Image, Qwen-Image, Flux, Bagel | SM 89 (Ada) |
+| Int8 | [Int8](int8.md) | Int8 W8A8 | Z-Image, Qwen-Image | SM 89 (Ada) / Ascend NPU |
+| GGUF | [GGUF](gguf.md) | GGUF format, dequant+GEMM for N-D tensors | Z-Image, Flux | SM 60 |
+
+### Multi-stage Omni Models (Pre-quantized Checkpoints)
+
+| Method | Description | Tested Models | Min GPU |
+|--------|-------------|---------------|---------|
+| ModelOpt FP8 | Pre-quantized FP8 via NVIDIA ModelOpt | Qwen3-Omni (thinker) | SM 89 (Ada/Hopper) |
+| ModelOpt NVFP4 | Pre-quantized NVFP4 via NVIDIA ModelOpt | Qwen3-Omni (experimental, quality issues) | SM 100 (Blackwell) |
+
+!!! note
+    AWQ, GPTQ, and BitsAndBytes are supported by vLLM's upstream quantization registry but have **not been tested** with vLLM-Omni pipelines. They may work via `build_quant_config()` but are not validated.
 
 ### Pre-quantized LLM Checkpoints (Multi-stage Models)
 
 For multi-stage models like Qwen3-Omni, the unified quantization framework auto-detects
-pre-quantized checkpoints via `quantization_config` in the HF config. Supported formats:
+pre-quantized checkpoints via `quantization_config` in the HF config. Quantization is
+automatically scoped to the thinker's `language_model` — audio encoder, vision encoder,
+talker, and code2wav remain in BF16.
 
-| Format | `quant_algo` | Hardware | Example |
-|--------|-------------|----------|---------|
-| ModelOpt FP8 | `FP8` | Ada/Hopper (SM 89+) | `asdazd/Qwen3-Omni-30B-A3B-Instruct_modelopt_FP8` |
-| ModelOpt NVFP4 | `NVFP4` | Blackwell (SM 100+) | `shunyang90/Qwen3-Omni-30B-A3B-Instruct-NVFP4` |
+| Format | `quant_algo` | Hardware | Example | Status |
+|--------|-------------|----------|---------|--------|
+| ModelOpt FP8 | `FP8` | Ada/Hopper (SM 89+) | `asdazd/Qwen3-Omni-30B-A3B-Instruct_modelopt_FP8` | Tested — 47% memory reduction, comparable throughput |
+| ModelOpt NVFP4 | `NVFP4` | Blackwell (SM 100+) | `shunyang90/Qwen3-Omni-30B-A3B-Instruct-NVFP4` | Experimental — loads and runs but output quality is unacceptable |
 
-Quantization is automatically scoped to the thinker's `language_model` — audio encoder,
-vision encoder, talker, and code2wav remain in BF16.
+**Tested FP8 results (Qwen3-Omni, 1×H200):**
+
+| Config | Model Memory (GiB) | Mem Reduction | Decode (tok/s) |
+|--------|-------------------|---------------|----------------|
+| BF16 baseline | 59.26 | — | 41.6 |
+| FP8 (ModelOpt) | 31.41 | 47% | 39.9 |
+
+FP8 enables the full 3-stage pipeline (thinker + talker + code2wav) on a single 64GB GPU,
+which is impossible with BF16 (thinker alone requires 59.26 GiB).
 
 ## Quantization Scope
 
-When `--quantization fp8` is enabled, the following components are quantized:
+### Diffusion Models
+
+When `--quantization fp8` is enabled for diffusion models:
 
 | Component | What Gets Quantized | Mechanism |
 |-----------|-------------------|-----------|
@@ -37,8 +56,20 @@ When `--quantization fp8` is enabled, the following components are quantized:
 | **Text encoder** | `nn.Linear` layers | FP8 weight storage, BF16 compute |
 | **VAE** | `nn.Conv2d`, `nn.Conv3d` layers | FP8 weight storage, BF16 compute |
 
+### Multi-stage Omni Models
+
+For pre-quantized omni model checkpoints, quantization is scoped per component:
+
+| Component | Quantized? | Notes |
+|-----------|-----------|-------|
+| **Thinker (language_model)** | Yes | FP8 or NVFP4 via ModelOpt |
+| **Audio encoder** | No | Stays BF16 |
+| **Vision encoder** | No | Stays BF16 |
+| **Talker** | No | Stays BF16 |
+| **Code2Wav** | No | Stays BF16 |
+
 !!! note
-    Not all models support all three components. See the [FP8 supported models table](fp8.md#supported-models) for per-model details.
+    Not all models support all components. See the [FP8 supported models table](fp8.md#supported-models) for per-model details.
 
 ## Device Compatibility for FP8
 
