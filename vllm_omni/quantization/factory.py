@@ -36,7 +36,7 @@ def _build_gguf(**kw: Any) -> QuantizationConfig:
 
 def _build_int8(**kw: Any) -> QuantizationConfig:
     """Lazy import for Int8 diffusion config (supports CUDA + NPU)."""
-    from vllm_omni.diffusion.quantization.int8 import DiffusionInt8Config
+    from .int8_config import DiffusionInt8Config
 
     return DiffusionInt8Config(**kw)
 
