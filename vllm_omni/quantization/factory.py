@@ -46,15 +46,31 @@ _OVERRIDES: dict[str, Callable[..., QuantizationConfig]] = {
     "int8": _build_int8,
 }
 
-SUPPORTED_QUANTIZATION_METHODS: list[str] = list(dict.fromkeys(QUANTIZATION_METHODS + list(_OVERRIDES.keys())))
+# Aliases map alternative method names to canonical ones before lookup.
+_METHOD_ALIASES: dict[str, str] = {
+    "auto-round": "inc",
+}
+
+# INC-specific kwarg normalization: on-disk configs use "bits" but
+# vLLM's INCConfig expects "weight_bits".
+_INC_KWARG_MAP: dict[str, str] = {"bits": "weight_bits"}
+
+SUPPORTED_QUANTIZATION_METHODS: list[str] = list(
+    dict.fromkeys(QUANTIZATION_METHODS + list(_OVERRIDES.keys()) + list(_METHOD_ALIASES.keys()))
+)
 
 
 def _build_single(method: str, **kwargs: Any) -> QuantizationConfig:
     """Build a single QuantizationConfig by method name.
 
-    Resolution: _OVERRIDES first, then vLLM registry via from_config().
+    Resolution: alias → _OVERRIDES → vLLM registry via from_config().
     """
     method = method.lower()
+    method = _METHOD_ALIASES.get(method, method)
+
+    # INC-specific kwarg normalization
+    if method == "inc":
+        kwargs = {_INC_KWARG_MAP.get(k, k): v for k, v in kwargs.items()}
 
     if method in _OVERRIDES:
         return _OVERRIDES[method](**kwargs)
