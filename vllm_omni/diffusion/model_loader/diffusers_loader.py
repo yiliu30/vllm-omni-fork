@@ -259,8 +259,8 @@ class DiffusersPipelineLoader:
         device: torch.device | None = None,
     ) -> nn.Module:
         """Load a model with the given configurations."""
-        # CPU offload + FP8: load weights on device for FP8 quantization
-        if load_device == "cpu" and od_config.quantization and od_config.quantization.lower() != "none":
+        # CPU offload + quantization: load weights on device for quantized weight processing
+        if load_device == "cpu" and od_config.quantization_config is not None:
             load_device = device.type
             logger.info(f"Quantization enabled with CPU offload, using {load_device} for weight loading")
 
@@ -282,7 +282,7 @@ class DiffusersPipelineLoader:
                     self._load_weights_with_gguf(model, od_config)
                 else:
                     # Quantization does not happen in `load_weights` but after it
-                    self.load_weights(model)
+                    self.load_weights(model, od_config)
 
             # Process weights after loading for quantization (e.g., FP8 online quantization)
             # This is needed for vLLM's quantization methods that need to transform weights
@@ -313,7 +313,7 @@ class DiffusersPipelineLoader:
                 if needs_device_move:
                     module.to(module_device)
 
-    def load_weights(self, model: nn.Module) -> None:
+    def load_weights(self, model: nn.Module, od_config: OmniDiffusionConfig | None = None) -> None:
         weights_to_load = self._get_expected_parameter_names(model)
         loaded_weights = model.load_weights(self.get_all_weights(model))
 
@@ -328,15 +328,56 @@ class DiffusersPipelineLoader:
         # that have loaded weights tracking currently.
         if loaded_weights is not None:
             weights_not_loaded = weights_to_load - loaded_weights
-            # NOTE: if the model is quantized, ignore not_loaded check for scale weights
-            weights_scale_not_loaded = {name for name in weights_not_loaded if name.endswith("weight_scale")}
-            weights_not_loaded = weights_not_loaded - weights_scale_not_loaded
             if weights_not_loaded:
-                raise ValueError(f"Following weights were not initialized from checkpoint: {weights_not_loaded}")
-            if weights_scale_not_loaded:
-                logger.warning(
-                    f"Following weight_scale weights were not initialized from checkpoint: {weights_scale_not_loaded}"
-                )
+                self._check_unloaded_weights(weights_not_loaded, od_config)
+
+    @staticmethod
+    def _is_expected_quantized_weight(name: str) -> bool:
+        """Return True if *name* is a quantization-specific parameter.
+
+        Quantization methods (GPTQ, AWQ, FP8, GGUF, Autoround, etc.) create extra
+        parameters that have no counterpart in an unquantized checkpoint.
+        These are expected to be absent and should not trigger a load error.
+        """
+        _QUANTIZED_WEIGHT_SUFFIXES = (
+            # GPTQ / AWQ / AutoRound
+            ".qweight",
+            ".g_idx",
+            ".scales",
+            ".qzeros",
+            # FP8
+            ".weight_scale",
+            ".weight_scale_inv",
+            ".input_scale",
+            # GGUF
+            ".qweight_type",
+        )
+        return name.endswith(_QUANTIZED_WEIGHT_SUFFIXES)
+
+    def _check_unloaded_weights(
+        self,
+        weights_not_loaded: set[str],
+        od_config: OmniDiffusionConfig | None,
+    ) -> None:
+        """Validate unloaded weights, tolerating expected quantization artifacts.
+
+        For quantized models, weights matching known quant-specific suffixes
+        are logged as a warning.  Any *other* missing weight raises
+        ``ValueError`` regardless of quantization.
+        """
+        if od_config is None or od_config.quantization_config is None:
+            raise ValueError(f"Following weights were not initialized from checkpoint: {weights_not_loaded}")
+
+        expected_missing = {w for w in weights_not_loaded if self._is_expected_quantized_weight(w)}
+        unexpected_missing = weights_not_loaded - expected_missing
+
+        if expected_missing:
+            logger.warning(
+                "Following weights were not initialized from checkpoint (expected for quantized models): %s",
+                expected_missing,
+            )
+        if unexpected_missing:
+            raise ValueError(f"Following weights were not initialized from checkpoint: {unexpected_missing}")
 
     def _is_gguf_quantization(self, od_config: OmniDiffusionConfig) -> bool:
         quant_config = od_config.quantization_config
@@ -480,7 +521,7 @@ class DiffusersPipelineLoader:
         elif load_format == "custom_pipeline":
             model_cls = resolve_obj_by_qualname(custom_pipeline_name)
             model = model_cls(od_config=od_config)
-        self.load_weights(model)
+        self.load_weights(model, od_config)
 
         # Collect all transformers to shard (some models have transformer_2 for MoE)
         transformers_to_shard = []

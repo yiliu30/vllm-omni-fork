@@ -170,15 +170,30 @@ class DiffusionParallelConfig:
 
 @dataclass
 class TransformerConfig:
-    """Container for raw transformer configuration dictionaries."""
+    """Container for raw transformer configuration dictionaries.
+
+    When constructed via ``from_dict``, any ``quantization_config`` section
+    embedded in the dict is automatically resolved via build_quant_config().
+    """
 
     params: dict[str, Any] = field(default_factory=dict)
+    quant_config: QuantizationConfig | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TransformerConfig":
         if not isinstance(data, dict):
             raise TypeError(f"Expected transformer config dict, got {type(data)!r}")
-        return cls(params=dict(data))
+        params = dict(data)
+
+        quant_config: QuantizationConfig | None = None
+        disk_qc = params.get("quantization_config")
+        if isinstance(disk_qc, dict) and "quant_method" in disk_qc:
+            method = disk_qc["quant_method"]
+            kwargs = {k: v for k, v in disk_qc.items() if k != "quant_method"}
+            quant_config = build_quant_config(method, **kwargs)
+            logger.info("Auto-detected quantization from transformer config: %s", method)
+
+        return cls(params=params, quant_config=quant_config)
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.params)
@@ -576,10 +591,27 @@ class OmniDiffusionConfig:
                     f"got {type(self.quantization_config)!r}"
                 )
 
+        # Auto-detect quantization from the on-disk transformer config
+        if self.quantization_config is None and self.tf_model_config.quant_config is not None:
+            self.quantization_config = self.tf_model_config.quant_config
+            logger.info(
+                "Auto-detected quantization from model config: %s",
+                getattr(self.quantization_config, "get_name", lambda: str(self.quantization_config))(),
+            )
+
         if self.max_cpu_loras is None:
             self.max_cpu_loras = 1
         elif self.max_cpu_loras < 1:
             raise ValueError("max_cpu_loras must be >= 1 for diffusion LoRA")
+
+    def __setattr__(self, name: str, value: object) -> None:
+        object.__setattr__(self, name, value)
+        # Re-resolve quantization when tf_model_config is assigned late
+        # (e.g. after loading the on-disk transformer config.json).
+        if name == "tf_model_config" and hasattr(self, "quantization_config"):
+            if self.quantization_config is None and hasattr(value, "quant_config") and value.quant_config is not None:
+                self.quantization_config = value.quant_config
+                logger.info("Auto-detected quantization from model config")
 
     def update_multimodal_support(self) -> None:
         self.supports_multimodal_inputs = self.model_class_name in {"QwenImageEditPlusPipeline"}
