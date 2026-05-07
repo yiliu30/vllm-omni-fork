@@ -32,6 +32,7 @@ from vllm_omni.diffusion.models.qwen_image.cfg_parallel import (
 )
 from vllm_omni.diffusion.models.qwen_image.qwen_image_transformer import (
     QwenImageTransformer2DModel,
+    resolve_qwen_image_quant_config,
 )
 from vllm_omni.diffusion.profiler.diffusion_pipeline_profiler import DiffusionPipelineProfilerMixin
 from vllm_omni.diffusion.request import OmniDiffusionRequest
@@ -293,9 +294,12 @@ class QwenImagePipeline(nn.Module, QwenImageCFGParallelMixin, DiffusionPipelineP
         self.vae = DistributedAutoencoderKLQwenImage.from_pretrained(
             model, subfolder="vae", local_files_only=local_files_only
         ).to(self.device)
+        quant_config = resolve_qwen_image_quant_config(od_config)
         transformer_kwargs = get_transformer_config_kwargs(od_config.tf_model_config, QwenImageTransformer2DModel)
         self.transformer = QwenImageTransformer2DModel(
-            od_config=od_config, quant_config=od_config.quantization_config, **transformer_kwargs
+            od_config=od_config,
+            quant_config=quant_config,
+            **transformer_kwargs,
         )
 
         self.tokenizer = Qwen2Tokenizer.from_pretrained(model, subfolder="tokenizer", local_files_only=local_files_only)
