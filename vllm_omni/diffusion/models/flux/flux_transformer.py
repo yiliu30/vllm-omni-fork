@@ -41,6 +41,20 @@ from vllm_omni.diffusion.layers.rope import RotaryEmbedding, apply_rope_to_qk
 logger = init_logger(__name__)
 
 
+def _resolve_flux_precision_sensitive_quant_config(
+    quant_config: "QuantizationConfig | None",
+) -> "QuantizationConfig | None":
+    """Keep FLUX's precision-sensitive layers full precision for FP8 only.
+
+    Pre-quantized checkpoints such as AutoRound carry explicit quantized
+    weights for these modules and must instantiate matching quantized layers.
+    """
+    get_name = getattr(quant_config, "get_name", None)
+    if callable(get_name) and get_name() == "fp8":
+        return None
+    return quant_config
+
+
 class ColumnParallelApproxGELU(nn.Module):
     def __init__(
         self,
@@ -380,10 +394,11 @@ class FluxSingleTransformerBlock(nn.Module):
     ):
         super().__init__()
         self.mlp_hidden_dim = int(dim * mlp_ratio)
+        modulation_quant_config = _resolve_flux_precision_sensitive_quant_config(quant_config)
 
-        # Modulation linear kept full precision; shift/scale/gate outputs
-        # are multiplied into the residual stream every block (see #2728).
-        self.norm = AdaLayerNormZeroSingle(dim, quant_config=None, prefix=f"{prefix}.norm")
+        # Keep modulation linear full precision for FP8 only; pre-quantized
+        # checkpoints (e.g. AutoRound) include quantized norm.linear weights.
+        self.norm = AdaLayerNormZeroSingle(dim, quant_config=modulation_quant_config, prefix=f"{prefix}.norm")
         self.proj_mlp = ReplicatedLinear(
             dim,
             self.mlp_hidden_dim,
@@ -564,17 +579,18 @@ class FluxTransformer2DModel(nn.Module):
 
         self.context_embedder = nn.Linear(joint_attention_dim, self.inner_dim)
         self.x_embedder = nn.Linear(in_channels, self.inner_dim)
+        dual_stream_quant_config = _resolve_flux_precision_sensitive_quant_config(quant_config)
 
-        # Dual-stream blocks kept full precision — FP8 on their joint
-        # attention path causes noise on FLUX (#2728). Single-stream
-        # blocks (38 vs 19) still get FP8 for memory savings.
+        # Keep dual-stream blocks full precision for FP8 only. Pre-quantized
+        # checkpoints such as AutoRound quantize these modules and must load
+        # into matching quantized layers.
         self.transformer_blocks = nn.ModuleList(
             [
                 FluxTransformerBlock(
                     dim=self.inner_dim,
                     num_attention_heads=num_attention_heads,
                     attention_head_dim=attention_head_dim,
-                    quant_config=None,
+                    quant_config=dual_stream_quant_config,
                     prefix=f"transformer_blocks.{i}",
                 )
                 for i in range(num_layers)
@@ -730,21 +746,31 @@ class FluxTransformer2DModel(nn.Module):
         loaded_params: set[str] = set()
         for name, loaded_weight in weights:
             original_name = name
-            lookup_name = name
+            mapped = False
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in original_name:
                     continue
                 lookup_name = original_name.replace(weight_name, param_name)
-                param = params_dict[lookup_name]
+                param = params_dict.get(lookup_name)
+                if param is None:
+                    break
                 weight_loader = param.weight_loader
                 weight_loader(param, loaded_weight, shard_id)
+                loaded_params.add(original_name)
+                loaded_params.add(lookup_name)
+                mapped = True
                 break
-            else:
-                if lookup_name not in params_dict and ".to_out.0." in lookup_name:
-                    lookup_name = lookup_name.replace(".to_out.0.", ".to_out.")
-                param = params_dict[lookup_name]
-                weight_loader = getattr(param, "weight_loader", default_weight_loader)
-                weight_loader(param, loaded_weight)
+            if mapped:
+                continue
+
+            lookup_name = original_name
+            if lookup_name not in params_dict and ".to_out.0." in lookup_name:
+                lookup_name = lookup_name.replace(".to_out.0.", ".to_out.")
+            param = params_dict.get(lookup_name)
+            if param is None:
+                continue
+            weight_loader = getattr(param, "weight_loader", default_weight_loader)
+            weight_loader(param, loaded_weight)
             loaded_params.add(original_name)
             loaded_params.add(lookup_name)
         return loaded_params
