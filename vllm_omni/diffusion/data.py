@@ -716,7 +716,7 @@ class OmniDiffusionConfig:
                 # Skip transformer config loading for diffusers adapter
                 # (non-DiT models don't have a separate transformer folder/config)
                 if self.diffusion_load_format == "diffusers":
-                    self.tf_model_config = TransformerConfig()
+                    self.set_tf_model_config(TransformerConfig())
                     try:
                         diffusers_pipeline_cls_name = config_dict["_class_name"]
                         self.diffusers_pipeline_cls = getattr(diffusers, diffusers_pipeline_cls_name)
@@ -728,14 +728,14 @@ class OmniDiffusionConfig:
                         )
                 else:
                     tf_config_dict = get_hf_file_to_dict("transformer/config.json", self.model)
-                    self.tf_model_config = TransformerConfig.from_dict(tf_config_dict)
+                    self.set_tf_model_config(TransformerConfig.from_dict(tf_config_dict))
             else:
                 raise FileNotFoundError("model_index.json not found")
         except (AttributeError, OSError, ValueError, FileNotFoundError):
             # Skip transformer config loading for diffusers adapter
             # (non-DiT models don't have a separate transformer folder/config)
             if self.diffusion_load_format == "diffusers":
-                self.tf_model_config = TransformerConfig()
+                self.set_tf_model_config(TransformerConfig())
                 logger.warning(
                     "Could not find valid model_index.json per diffusers format. "
                     "This model is suspectedly unsupported by the diffusers backend. "
@@ -748,23 +748,23 @@ class OmniDiffusionConfig:
                 if cfg is None:
                     raise ValueError(f"Could not find config.json or model_index.json for model {self.model}")
 
-                self.tf_model_config = TransformerConfig.from_dict(cfg)
+                self.set_tf_model_config(TransformerConfig.from_dict(cfg))
                 model_type = cfg.get("model_type")
                 architectures = cfg.get("architectures") or []
 
                 if model_type == "bagel" or "BagelForConditionalGeneration" in architectures:
                     self.model_class_name = "BagelPipeline"
-                    self.tf_model_config = TransformerConfig()
+                    self.set_tf_model_config(TransformerConfig())
                     self.update_multimodal_support()
                 elif model_type == "nextstep":
                     if self.model_class_name is None:
                         self.model_class_name = "NextStep11Pipeline"
-                    self.tf_model_config = TransformerConfig()
+                    self.set_tf_model_config(TransformerConfig())
                     self.update_multimodal_support()
                 elif model_type == "s2v":
                     if self.model_class_name is None:
                         self.model_class_name = "WanS2VPipeline"
-                    self.tf_model_config = TransformerConfig()
+                    self.set_tf_model_config(TransformerConfig())
                     self.update_multimodal_support()
                 elif architectures and len(architectures) == 1:
                     self.model_class_name = architectures[0]
