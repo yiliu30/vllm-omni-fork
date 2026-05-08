@@ -145,3 +145,41 @@ def test_integration_autodetect_from_transformer_config():
     od_config = OmniDiffusionConfig(model="test", tf_model_config=tf_config)
     assert isinstance(od_config.quantization_config, INCConfig)
     assert od_config.quantization_config.weight_bits == 4
+
+
+def test_enrich_config_propagates_embedded_transformer_quantization(monkeypatch):
+    """enrich_config() should propagate embedded transformer quantization."""
+    from vllm.model_executor.layers.quantization.inc import INCConfig
+    import vllm.transformers_utils.config as hf_config
+
+    from vllm_omni.diffusion.data import OmniDiffusionConfig
+
+    model_index = {"_class_name": "FluxPipeline"}
+    transformer_config = {
+        "quantization_config": {
+            "quant_method": "auto-round",
+            "bits": 4,
+            "group_size": 128,
+            "sym": True,
+            "packing_format": "auto_round:auto_gptq",
+            "block_name_to_quantize": "transformer_blocks,single_transformer_blocks",
+            "autoround_version": "0.12.0",
+            "batch_size": 1,
+            "iters": 0,
+        }
+    }
+
+    def fake_get_hf_file_to_dict(filename, _model):
+        if filename == "model_index.json":
+            return model_index
+        if filename == "transformer/config.json":
+            return transformer_config
+        raise FileNotFoundError(filename)
+
+    monkeypatch.setattr(hf_config, "get_hf_file_to_dict", fake_get_hf_file_to_dict)
+
+    od_config = OmniDiffusionConfig(model="test-model", diffusion_load_format="nondiffusers")
+    od_config.enrich_config()
+
+    assert isinstance(od_config.quantization_config, INCConfig)
+    assert od_config.quantization_config.weight_bits == 4

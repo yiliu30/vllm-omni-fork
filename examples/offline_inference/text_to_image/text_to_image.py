@@ -17,6 +17,42 @@ from vllm_omni.lora.utils import stable_lora_int_id
 from vllm_omni.platforms import current_omni_platform
 
 
+MODEL_DEFAULT_GUIDANCE_SCALES = {
+    "FluxPipeline": 3.5,
+    "FluxKontextPipeline": 3.5,
+    "Flux2Pipeline": 4.0,
+    "Flux2KleinPipeline": 4.0,
+    "QwenImagePipeline": 1.0,
+    "QwenImageEditPipeline": 1.0,
+    "QwenImageEditPlusPipeline": 1.0,
+    "QwenImageLayeredPipeline": 1.0,
+    "ZImagePipeline": 5.0,
+    "LongCatImagePipeline": 4.5,
+    "LongCatImageEditPipeline": 4.5,
+    "OvisImagePipeline": 5.0,
+    "StableDiffusion3Pipeline": 4.0,
+    "NextStep11Pipeline": 7.5,
+    "HunyuanImage3ForCausalMM": 5.0,
+}
+
+
+def detect_model_class_name(model_name: str) -> str | None:
+    """Best-effort model class detection for CLI defaults and display."""
+    from vllm.transformers_utils.config import get_hf_file_to_dict
+
+    for config_name in ("model_index.json", "config.json"):
+        try:
+            cfg = get_hf_file_to_dict(config_name, model_name)
+        except Exception:
+            continue
+        if not isinstance(cfg, dict):
+            continue
+        class_name = cfg.get("_class_name")
+        if isinstance(class_name, str) and class_name:
+            return class_name
+    return None
+
+
 def is_nextstep_model(model_name: str) -> bool:
     """Check if the model is a NextStep model by reading its config."""
     from vllm.transformers_utils.config import get_hf_file_to_dict
@@ -28,6 +64,37 @@ def is_nextstep_model(model_name: str) -> bool:
     except Exception:
         pass
     return False
+
+
+def detect_embedded_quantization(model_name: str) -> str | None:
+    """Detect checkpoint-declared quantization for display purposes."""
+    from vllm.transformers_utils.config import get_hf_file_to_dict
+
+    for config_name in ("transformer/config.json", "config.json"):
+        try:
+            cfg = get_hf_file_to_dict(config_name, model_name)
+        except Exception:
+            continue
+        if not isinstance(cfg, dict):
+            continue
+        quant_cfg = cfg.get("quantization_config")
+        if not isinstance(quant_cfg, dict):
+            continue
+        quant_method = quant_cfg.get("quant_method") or quant_cfg.get("method")
+        if quant_method:
+            return f"{quant_method} (embedded)"
+    return None
+
+
+def resolve_guidance_scale(model_name: str, guidance_scale: float | None) -> float:
+    if guidance_scale is not None:
+        return guidance_scale
+    model_class_name = detect_model_class_name(model_name)
+    if model_class_name is not None:
+        default = MODEL_DEFAULT_GUIDANCE_SCALES.get(model_class_name)
+        if default is not None:
+            return default
+    return 4.0
 
 
 def parse_profiler_config(value: str) -> dict[str, Any]:
@@ -68,14 +135,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--cfg-scale",
         type=float,
-        default=4.0,
-        help="True classifier-free guidance scale specific to Qwen-Image.",
+        default=None,
+        help="True classifier-free guidance scale specific to Qwen-Image. Default: model default.",
     )
     parser.add_argument(
         "--guidance-scale",
         type=float,
-        default=4.0,
-        help="Classifier-free guidance scale. HunyuanImage3 recommends 4.0-5.0.",
+        default=None,
+        help="Classifier-free guidance scale. Default: model default.",
     )
     parser.add_argument("--height", type=int, default=1024, help="Height of generated image.")
     parser.add_argument("--width", type=int, default=1024, help="Width of generated image.")
@@ -94,8 +161,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--num-inference-steps",
         type=int,
-        default=50,
-        help="Number of denoising steps for the diffusion sampler.",
+        default=None,
+        help="Number of denoising steps for the diffusion sampler. Default: model default.",
     )
     parser.add_argument(
         "--cache-backend",
@@ -311,6 +378,7 @@ def main():
     args = parse_args()
     generator = torch.Generator(device=current_omni_platform.device_type).manual_seed(args.seed)
     use_nextstep = is_nextstep_model(args.model)
+    effective_guidance_scale = resolve_guidance_scale(args.model, args.guidance_scale)
 
     cache_config = None
     cache_backend = args.cache_backend
@@ -410,9 +478,16 @@ def main():
     print(f"\n{'=' * 60}")
     print("Generation Configuration:")
     print(f"  Model: {args.model}")
-    print(f"  Inference steps: {args.num_inference_steps}")
+    print(f"  Inference steps: {args.num_inference_steps if args.num_inference_steps is not None else 'model default'}")
     print(f"  Cache backend: {cache_backend if cache_backend else 'None (no acceleration)'}")
-    print(f"  Quantization: {args.quantization if args.quantization else 'None (BF16)'}")
+    displayed_quantization = args.quantization or detect_embedded_quantization(args.model) or "None (BF16)"
+    print(f"  Quantization: {displayed_quantization}")
+    print(
+        "  Guidance: "
+        f"guidance_scale={effective_guidance_scale}"
+        f"{' (model default)' if args.guidance_scale is None else ''}, "
+        f"cfg_scale={args.cfg_scale if args.cfg_scale is not None else 'model default'}"
+    )
     if ignored_layers:
         print(f"  Ignored layers: {ignored_layers}")
     print(
@@ -462,7 +537,7 @@ def main():
             width=args.width,
             generator=generator,
             true_cfg_scale=args.cfg_scale,
-            guidance_scale=args.guidance_scale,
+            guidance_scale=effective_guidance_scale,
             guidance_scale_2=args.guidance_scale_2,
             num_inference_steps=args.num_inference_steps,
             num_outputs_per_prompt=args.num_images_per_prompt,
