@@ -30,6 +30,26 @@ def is_nextstep_model(model_name: str) -> bool:
     return False
 
 
+def detect_embedded_quantization(model_name: str) -> str | None:
+    """Detect checkpoint-declared quantization for display purposes."""
+    from vllm.transformers_utils.config import get_hf_file_to_dict
+
+    for config_name in ("transformer/config.json", "config.json"):
+        try:
+            cfg = get_hf_file_to_dict(config_name, model_name)
+        except Exception:
+            continue
+        if not isinstance(cfg, dict):
+            continue
+        quant_cfg = cfg.get("quantization_config")
+        if not isinstance(quant_cfg, dict):
+            continue
+        quant_method = quant_cfg.get("quant_method") or quant_cfg.get("method")
+        if quant_method:
+            return f"{quant_method} (embedded)"
+    return None
+
+
 def parse_profiler_config(value: str) -> dict[str, Any]:
     try:
         config = json.loads(value)
@@ -412,7 +432,8 @@ def main():
     print(f"  Model: {args.model}")
     print(f"  Inference steps: {args.num_inference_steps}")
     print(f"  Cache backend: {cache_backend if cache_backend else 'None (no acceleration)'}")
-    print(f"  Quantization: {args.quantization if args.quantization else 'None (BF16)'}")
+    displayed_quantization = args.quantization or detect_embedded_quantization(args.model) or "None (BF16)"
+    print(f"  Quantization: {displayed_quantization}")
     if ignored_layers:
         print(f"  Ignored layers: {ignored_layers}")
     print(
