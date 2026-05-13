@@ -98,6 +98,10 @@ class SequentialOffloadHook(ModelHook):
         self._move_params(module, self.device, non_blocking=False)
 
     def pre_forward(self, module: nn.Module, *args, **kwargs) -> tuple[tuple, dict]:
+        logger.debug(
+            f"Before forward of {module.__class__.__name__}: offloading {[t.__class__.__name__ for t in self.offload_targets]} to CPU, loading {module.__class__.__name__} to GPU; free memory: %.4f GB",
+            current_omni_platform.get_free_memory() / 1024 / 1024 / 1024,
+        )
         # Offload target modules to CPU
         for target in self.offload_targets:
             self._to_cpu(target)

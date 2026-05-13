@@ -49,6 +49,26 @@ from vllm_omni.diffusion.layers.rope import RotaryEmbedding
 logger = init_logger(__name__)
 
 
+def _make_tp_gathered_linear(
+    input_size: int,
+    output_size: int,
+    *,
+    bias: bool = True,
+    quant_config: "QuantizationConfig | None" = None,
+    prefix: str = "",
+) -> ColumnParallelLinear:
+    """Shard weights across TP ranks while keeping the full activation shape."""
+    return ColumnParallelLinear(
+        input_size,
+        output_size,
+        bias=bias,
+        gather_output=True,
+        return_bias=False,
+        quant_config=quant_config,
+        prefix=prefix,
+    )
+
+
 class ImageRopePrepare(nn.Module):
     """Prepares image hidden_states and RoPE embeddings for sequence parallel.
 
@@ -171,20 +191,18 @@ class QwenTimestepProjEmbeddings(nn.Module):
         self.timestep_embedder = TimestepEmbedding(in_channels=256, time_embed_dim=embedding_dim)
         # Time embedding MLP is kept full precision (quant_config=None) —
         # small layers that feed per-block modulation; precision-sensitive
-        # (see #2728).
-        self.timestep_embedder.linear_1 = ReplicatedLinear(
+        # (see #2728). TP still shards the weights and gathers the full output.
+        self.timestep_embedder.linear_1 = _make_tp_gathered_linear(
             256,
             embedding_dim,
             bias=True,
-            return_bias=False,
             quant_config=None,
             prefix="timestep_embedder.linear_1",
         )
-        self.timestep_embedder.linear_2 = ReplicatedLinear(
+        self.timestep_embedder.linear_2 = _make_tp_gathered_linear(
             embedding_dim,
             embedding_dim,
             bias=True,
-            return_bias=False,
             quant_config=None,
             prefix="timestep_embedder.linear_2",
         )
@@ -707,14 +725,13 @@ class QwenImageTransformerBlock(nn.Module):
         # Image processing modules.
         # Modulation linear is kept full precision (quant_config=None) — it
         # produces shift/scale/gate values that are precision-sensitive
-        # (see #2728).
+        # (see #2728). TP still shards the weights and gathers the full output.
         self.img_mod = nn.Sequential(
             nn.SiLU(),
-            ReplicatedLinear(
+            _make_tp_gathered_linear(
                 dim,
                 6 * dim,
                 bias=True,
-                return_bias=False,
                 quant_config=None,
                 prefix="img_mod.1",
             ),
@@ -734,11 +751,10 @@ class QwenImageTransformerBlock(nn.Module):
         # Text processing modules.
         self.txt_mod = nn.Sequential(
             nn.SiLU(),
-            ReplicatedLinear(
+            _make_tp_gathered_linear(
                 dim,
                 6 * dim,
                 bias=True,
-                return_bias=False,
                 quant_config=None,
                 prefix="txt_mod.1",
             ),
@@ -971,19 +987,18 @@ class QwenImageTransformer2DModel(CachedTransformer):
 
         # Entry projections (image/text) are kept full precision —
         # small sensitive layers at the network boundary (see #2728).
-        self.img_in = ReplicatedLinear(
+        # TP still shards the weights and gathers the full output.
+        self.img_in = _make_tp_gathered_linear(
             in_channels,
             self.inner_dim,
             bias=True,
-            return_bias=False,
             quant_config=None,
             prefix="img_in",
         )
-        self.txt_in = ReplicatedLinear(
+        self.txt_in = _make_tp_gathered_linear(
             joint_attention_dim,
             self.inner_dim,
             bias=True,
-            return_bias=False,
             quant_config=None,
             prefix="txt_in",
         )
@@ -1003,13 +1018,12 @@ class QwenImageTransformer2DModel(CachedTransformer):
 
         # Final modulation and output projection are kept full precision —
         # they produce the output latent and are precision-sensitive
-        # (see #2728).
+        # (see #2728). TP still shards the weights and gathers the full output.
         self.norm_out = AdaLayerNormContinuous(self.inner_dim, self.inner_dim, elementwise_affine=False, eps=1e-6)
-        self.norm_out.linear = ReplicatedLinear(
+        self.norm_out.linear = _make_tp_gathered_linear(
             self.inner_dim,
             2 * self.inner_dim,
             bias=True,
-            return_bias=False,
             quant_config=None,
             prefix="norm_out.linear",
         )
