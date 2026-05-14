@@ -157,28 +157,52 @@ def _quantize_weight_mxfp4(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Quantize a BF16/FP16 weight tensor to MXFP4 format.
 
-    Uses flashinfer's mxfp4_quantize with scale trimming to produce
-    the standard kernel-agnostic format.
+    Uses compressed-tensors' MX scale generation and FP4 E2M1 quantization
+    to produce the standard kernel-agnostic format.
+
+    Steps:
+      1. Compute per-group (block_size=32) max absolute values
+      2. Generate E8M0 scales via power-of-2 rounding
+      3. Quantize: divide by scale, round to nearest FP4 E2M1 value
+      4. Pack two FP4 nibbles per uint8 byte
 
     Returns:
         (weight_packed, weight_scale):
           weight_packed: [N, K/2] uint8 (two E2M1 nibbles per byte)
           weight_scale:  [N, K/32] uint8 (E8M0 shared exponents)
     """
+    from compressed_tensors.compressors.mx_utils import decompress_mx_scale
+    from compressed_tensors.compressors.nvfp4.helpers import pack_fp4_to_uint8
+    from compressed_tensors.quantization.quant_args import FP4_E2M1_DATA
+    from compressed_tensors.quantization.utils.mxfp_utils import (
+        generate_mx_scales,
+    )
+
     N, K = weight.shape
     assert K % _MXFP4_GROUP_SIZE == 0, (
         f"K={K} must be divisible by {_MXFP4_GROUP_SIZE}"
     )
-
-    from vllm.utils.flashinfer import flashinfer_mxfp4_quantize
-
-    weight_2d = weight.reshape(-1, K)
-    packed, scales = flashinfer_mxfp4_quantize(weight_2d)
-    # flashinfer pads scales: N→ceil(N/128)*128, K/32→ceil(K/32/4)*4
-    # Trim back to standard shape for kernel.process_weights_after_loading
     num_groups = K // _MXFP4_GROUP_SIZE
-    scales = scales[:N, :num_groups].contiguous()
-    return packed, scales
+
+    # 1. Per-group max absolute value
+    weight_groups = weight.reshape(N, num_groups, _MXFP4_GROUP_SIZE)
+    amax = weight_groups.abs().amax(dim=-1)  # [N, num_groups]
+
+    # 2. E8M0 scales (uint8 biased exponents, bias=127)
+    weight_scale = generate_mx_scales(amax.float(), num_bits=4).to(torch.uint8)
+
+    # 3. Quantize: scale → float, divide, round to FP4 E2M1
+    scale_float = decompress_mx_scale(weight_scale)  # [N, num_groups] bfloat16
+    scale_expanded = scale_float.unsqueeze(-1).expand_as(weight_groups)
+    scaled = weight_groups.float() / scale_expanded.float()
+    quantized = FP4_E2M1_DATA.cast_to_fp4(
+        scaled.clamp(FP4_E2M1_DATA.min, FP4_E2M1_DATA.max)
+    )
+
+    # 4. Pack pairs of FP4 values into uint8
+    weight_packed = pack_fp4_to_uint8(quantized.reshape(N, K))
+
+    return weight_packed, weight_scale
 
 
 # ---------------------------------------------------------------------------
