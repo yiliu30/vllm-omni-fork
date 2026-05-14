@@ -12,23 +12,9 @@ Architecture:
       NPUMxfp8OnlineLinearMethod  – NPU online: _LazyWeightMixin for create_weights,
                                      overrides process_weights to quantize BF16 → FP8.
 
-Extending to a new platform (e.g. CUDA MXFP8 once the ops are available):
-
-    class CUDAMxfp8LinearMethod(MXFPLinearMethodBase):
-        def create_weights(self, ...): ...
-        def process_weights_after_loading(self, layer): ...
-        def _quantize_activation(self, x): ...   # CUDA FP8 quant op
-        def _quant_matmul(self, ...): ...         # CUDA FP8 GEMM
-
-    class CUDAMxfp8OnlineLinearMethod(_LazyWeightMixin, CUDAMxfp8LinearMethod):
-        def process_weights_after_loading(self, layer): ...  # BF16 → FP8
-
-Extending to a new MX precision with a different calling convention (e.g. dual-scale FP4):
-
-    class NPUMxfp4DualScaleLinearMethod(MXFPLinearMethodBase):
-        def _apply_inner(self, layer, x, bias, ori_dtype): ...  # override for 3-tuple path
-        def _quantize_activation(self, x, smooth_scale): ...    # returns 3-tuple
-        def _quant_matmul(self, x_q, l0, l1, layer, ...): ...  # dual-level GEMM
+  CUDAMxfp8OnlineLinearMethod     – CUDA online: _LazyWeightMixin + BF16 → MXFP8 at load time,
+                                     delegates to init_mxfp8_linear_kernel() for GEMM
+                                     (FlashInfer SM100+ / Marlin SM80+ / emulation fallback).
 """
 
 from __future__ import annotations
@@ -133,10 +119,11 @@ class DiffusionMXFP8Config(QuantizationConfig):
                 if self.is_checkpoint_mxfp8_serialized:
                     return NPUMxfp8LinearMethod(self)
                 return NPUMxfp8OnlineLinearMethod(self)
-            # Placeholder for future platforms: add `elif is_cuda(): ...` here.
+            if current_omni_platform.is_cuda():
+                return CUDAMxfp8OnlineLinearMethod(self)
             raise NotImplementedError(
                 "DiffusionMXFP8Config (W8A8 MXFP8) is currently only supported "
-                "on NPU (Ascend) platforms. CUDA support is not yet implemented."
+                "on NPU (Ascend) and CUDA platforms."
             )
         return None
 
@@ -450,3 +437,141 @@ class NPUMxfp8OnlineLinearMethod(_LazyWeightMixin, NPUMxfp8LinearMethod):
         replace_parameter(layer, "weight", weight_fp8)
         replace_parameter(layer, "weight_scale", weight_scale)
         layer._already_called_process_weights_after_loading = True
+
+
+# ---------------------------------------------------------------------------
+# CUDA MXFP8 weight quantization: BF16 → MXFP8
+# ---------------------------------------------------------------------------
+
+_MXFP8_GROUP_SIZE = 32
+
+
+def _quantize_weight_mxfp8(
+    weight: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Quantize a BF16/FP16 weight tensor to MXFP8 format.
+
+    Uses compressed-tensors' MX scale generation and FP8 E4M3 casting
+    to produce the standard kernel-agnostic format.
+
+    Steps:
+      1. Compute per-group (block_size=32) max absolute values
+      2. Generate E8M0 scales via power-of-2 rounding (with FP8 offset)
+      3. Quantize: divide by scale, cast to float8_e4m3fn
+
+    Returns:
+        (weight_fp8, weight_scale):
+          weight_fp8:   [N, K] float8_e4m3fn
+          weight_scale: [N, K/32] uint8 (E8M0 shared exponents)
+    """
+    from compressed_tensors.compressors.mx_utils import decompress_mx_scale
+    from compressed_tensors.quantization.utils.mxfp_utils import (
+        generate_mx_scales,
+    )
+
+    N, K = weight.shape
+    assert K % _MXFP8_GROUP_SIZE == 0, (
+        f"K={K} must be divisible by {_MXFP8_GROUP_SIZE}"
+    )
+    num_groups = K // _MXFP8_GROUP_SIZE
+
+    # 1. Per-group max absolute value
+    weight_groups = weight.reshape(N, num_groups, _MXFP8_GROUP_SIZE)
+    amax = weight_groups.abs().amax(dim=-1)  # [N, num_groups]
+
+    # 2. E8M0 scales (uint8 biased exponents, bias=127, offset=8 for FP8)
+    weight_scale = generate_mx_scales(amax.float(), num_bits=8).to(torch.uint8)
+
+    # 3. Quantize: scale → float, divide, cast to FP8 E4M3
+    scale_float = decompress_mx_scale(weight_scale)  # [N, num_groups] bfloat16
+    scale_expanded = scale_float.unsqueeze(-1).expand_as(weight_groups)
+    scaled = weight_groups.float() / scale_expanded.float()
+    fp8_max = torch.finfo(torch.float8_e4m3fn).max
+    weight_fp8 = scaled.clamp(-fp8_max, fp8_max).reshape(N, K).to(
+        torch.float8_e4m3fn
+    )
+
+    return weight_fp8, weight_scale
+
+
+# ---------------------------------------------------------------------------
+# CUDA MXFP8 online method (BF16 checkpoint → MXFP8 at load time)
+# ---------------------------------------------------------------------------
+
+
+class CUDAMxfp8OnlineLinearMethod(_LazyWeightMixin, LinearMethodBase):
+    """CUDA W8A8 MXFP8 online linear method.
+
+    Quantizes BF16 weights to MXFP8 at load time, then delegates GEMM to the
+    kernel auto-selected by init_mxfp8_linear_kernel() (FlashInfer on SM100+,
+    Marlin on SM80+, emulation fallback).
+
+    MRO: CUDAMxfp8OnlineLinearMethod → _LazyWeightMixin → LinearMethodBase
+
+      create_weights   : _LazyWeightMixin       (meta device + patched loader)
+      process_weights  : CUDAMxfp8OnlineLinearMethod  (BF16 → MXFP8 + kernel)
+      apply            : CUDAMxfp8OnlineLinearMethod  (kernel.apply_weights)
+    """
+
+    def __init__(self, quant_config: DiffusionMXFP8Config) -> None:
+        self.quant_config = quant_config
+        self._kernel = None
+
+    @property
+    def kernel(self):
+        """Lazily initialize and cache the MXFP8 GEMM kernel."""
+        if self._kernel is None:
+            from vllm.model_executor.kernels.linear import (
+                init_mxfp8_linear_kernel,
+            )
+
+            self._kernel = init_mxfp8_linear_kernel()
+        return self._kernel
+
+    def process_weights_after_loading(self, layer: Module) -> None:
+        if getattr(
+            layer, "_already_called_process_weights_after_loading", False
+        ):
+            return
+
+        # Materialize weight if still on meta device (dummy-weight init path).
+        if layer.weight.device == torch.device("meta"):
+            weight = ModelWeightParameter(
+                data=torch.empty_like(
+                    layer.weight, device=layer._load_device
+                ),
+                input_dim=1,
+                output_dim=0,
+                weight_loader=layer.weight.weight_loader,
+            )
+            _copy_missing_attrs(layer.weight, weight)
+            layer.register_parameter("weight", weight)
+            initialize_single_dummy_weight(layer.weight)
+
+        # Ensure params_dtype is set for kernel compatibility
+        if not hasattr(layer, "params_dtype"):
+            layer.params_dtype = layer.orig_dtype
+
+        # Quantize BF16/FP16 weight → MXFP8
+        weight_fp8, weight_scale = _quantize_weight_mxfp8(
+            layer.weight.data
+        )
+
+        # Replace weight with fp8
+        replace_parameter(layer, "weight", weight_fp8)
+        # Register weight_scale parameter
+        layer.weight_scale = torch.nn.Parameter(
+            weight_scale, requires_grad=False
+        )
+
+        # Delegate to kernel for kernel-specific transforms (swizzle, repack)
+        self.kernel.process_weights_after_loading(layer)
+        layer._already_called_process_weights_after_loading = True
+
+    def apply(
+        self,
+        layer: torch.nn.Module,
+        x: torch.Tensor,
+        bias: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        return self.kernel.apply_weights(layer, x, bias)
