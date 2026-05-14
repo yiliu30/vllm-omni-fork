@@ -206,7 +206,7 @@ def parse_args() -> argparse.Namespace:
         "--quantization",
         type=str,
         default=None,
-        choices=["fp8", "mxfp8", "int8", "gguf"],
+        choices=["fp8", "mxfp8", "int8", "gguf", "mxfp4"],
         help="Quantization method for the transformer. mxfp8: W8A8 MXFP8 online quant (NPU). fp8: online FP8 (GPU).",
     )
     parser.add_argument(
