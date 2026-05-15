@@ -67,28 +67,39 @@ class SageAttentionBackend(AttentionBackend):
 def _auto_tile_size_q(head_dim: int) -> int:
     """Pick tile_size_q that fits GPU shared memory, or return 0 to signal fallback.
 
-    The sage3 kernel with 128×128 tiles and head_dim=128 needs ~192KB shared memory.
-    Even with tile_q=64, it needs ~160KB. GPUs with <160KB shared memory per SM
-    (e.g., RTX 6000D with 100KB) cannot run sage3 at all — we signal fallback.
+    The sage3 kernel with 128×128 tiles and head_dim=128 needs ~192KB shared memory
+    with fp32 accumulator. Using bf16 accumulators (~96KB) fits on most GPUs.
+    GPUs with shared memory < 96KB would need fallback.
     """
     try:
         shmem = torch.cuda.get_device_properties(0).shared_memory_per_multiprocessor
     except Exception:
         return 128  # optimistic default
 
-    if shmem >= 200 * 1024:  # A100 (164KB), H100 (228KB)
+    if shmem >= 200 * 1024:  # A100 (164KB), H100 (228KB) — fp32 fits
         return 128
-    elif shmem >= 165 * 1024:  # ~160KB needed for tile_q=64
-        logger.info("sage3: using tile_size_q=64 (GPU shmem=%dKB)", shmem // 1024)
-        return 64
+    elif shmem >= 100 * 1024:  # RTX 6000D (100KB) — bf16 fits at 128
+        # Caller must also set acc_dtype=bf16_both_dot
+        return 128
     else:
-        # GPU shared memory too small for sage3 kernel
         logger.warning(
-            "sage3: GPU shared memory (%dKB) insufficient for Triton attention kernel "
-            "(needs >=160KB). Will fall back to torch SDPA for attention.",
+            "sage3: GPU shared memory (%dKB) may be insufficient. "
+            "Will attempt sage3 with bf16 accumulators.",
             shmem // 1024,
         )
-        return 0  # signal: cannot use sage3
+        return 64
+
+
+def _auto_acc_dtype(shmem_bytes: int, user_acc_dtype: str) -> str:
+    """If user didn't override, pick acc_dtype based on GPU shared memory."""
+    if user_acc_dtype != "fp32":
+        return user_acc_dtype  # user explicitly chose, respect it
+    if shmem_bytes >= 200 * 1024:
+        return "fp32"
+    # GPU needs bf16 accumulators to fit in shared memory
+    logger.info("sage3: auto-selecting acc_dtype=bf16_both_dot (GPU shmem=%dKB < 200KB)",
+                shmem_bytes // 1024)
+    return "bf16_both_dot"
 
 
 class SageAttentionImpl(AttentionImpl):
@@ -118,9 +129,14 @@ class SageAttentionImpl(AttentionImpl):
                 logger.warning("SageAttentionImpl ignoring backend_kwargs: %s",
                                list(backend_kwargs.keys()))
 
-        # Auto-detect tile_size_q based on GPU shared memory
+        # Auto-detect tile_size_q and acc_dtype based on GPU shared memory
         if _USE_SAGE3 and self._sage3_tile_q == 0:
             self._sage3_tile_q = _auto_tile_size_q(head_size)
+            try:
+                shmem = torch.cuda.get_device_properties(0).shared_memory_per_multiprocessor
+            except Exception:
+                shmem = 200 * 1024
+            self._sage3_acc_dtype = _auto_acc_dtype(shmem, self._sage3_acc_dtype)
 
     def forward_cuda(
         self,
