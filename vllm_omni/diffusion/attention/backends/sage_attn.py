@@ -64,6 +64,33 @@ class SageAttentionBackend(AttentionBackend):
         return SageAttentionImpl
 
 
+def _auto_tile_size_q(head_dim: int) -> int:
+    """Pick tile_size_q that fits GPU shared memory, or return 0 to signal fallback.
+
+    The sage3 kernel with 128×128 tiles and head_dim=128 needs ~192KB shared memory.
+    Even with tile_q=64, it needs ~160KB. GPUs with <160KB shared memory per SM
+    (e.g., RTX 6000D with 100KB) cannot run sage3 at all — we signal fallback.
+    """
+    try:
+        shmem = torch.cuda.get_device_properties(0).shared_memory_per_multiprocessor
+    except Exception:
+        return 128  # optimistic default
+
+    if shmem >= 200 * 1024:  # A100 (164KB), H100 (228KB)
+        return 128
+    elif shmem >= 165 * 1024:  # ~160KB needed for tile_q=64
+        logger.info("sage3: using tile_size_q=64 (GPU shmem=%dKB)", shmem // 1024)
+        return 64
+    else:
+        # GPU shared memory too small for sage3 kernel
+        logger.warning(
+            "sage3: GPU shared memory (%dKB) insufficient for Triton attention kernel "
+            "(needs >=160KB). Will fall back to torch SDPA for attention.",
+            shmem // 1024,
+        )
+        return 0  # signal: cannot use sage3
+
+
 class SageAttentionImpl(AttentionImpl):
     def __init__(
         self,
@@ -82,12 +109,18 @@ class SageAttentionImpl(AttentionImpl):
         # sage3 config from env or backend_kwargs
         self._sage3_config = os.environ.get("SAGE3_QUANT_FORMAT", "mxfp4")
         self._sage3_acc_dtype = os.environ.get("SAGE3_ACC_DTYPE", "fp32")
+        self._sage3_tile_q = int(os.environ.get("SAGE3_TILE_Q", "0"))  # 0 = auto
         if backend_kwargs:
             self._sage3_config = backend_kwargs.pop("sage3_config", self._sage3_config)
             self._sage3_acc_dtype = backend_kwargs.pop("sage3_acc_dtype", self._sage3_acc_dtype)
+            self._sage3_tile_q = backend_kwargs.pop("sage3_tile_q", self._sage3_tile_q)
             if backend_kwargs:
                 logger.warning("SageAttentionImpl ignoring backend_kwargs: %s",
                                list(backend_kwargs.keys()))
+
+        # Auto-detect tile_size_q based on GPU shared memory
+        if _USE_SAGE3 and self._sage3_tile_q == 0:
+            self._sage3_tile_q = _auto_tile_size_q(head_size)
 
     def forward_cuda(
         self,
@@ -118,9 +151,10 @@ class SageAttentionImpl(AttentionImpl):
         k = key.transpose(1, 2)
         v = value.transpose(1, 2)
 
-        # sage3 requires Q/K/V to have the same seq length.
-        # For cross-attention (different N), fall back to torch SDPA.
-        if q.shape[2] != k.shape[2]:
+        # Fall back to torch SDPA if:
+        # 1. sage3 can't fit in shared memory (tile_q=0)
+        # 2. Cross-attention (different Q/K seq lengths)
+        if self._sage3_tile_q == 0 or q.shape[2] != k.shape[2]:
             out = F.scaled_dot_product_attention(
                 q, k, v,
                 is_causal=self.causal,
@@ -133,6 +167,7 @@ class SageAttentionImpl(AttentionImpl):
             config=self._sage3_config,
             is_causal=self.causal,
             sm_scale=self.softmax_scale,
+            tile_size_q=self._sage3_tile_q,
             acc_dtype=self._sage3_acc_dtype,
         )
         return out.transpose(1, 2)  # back to NHD
