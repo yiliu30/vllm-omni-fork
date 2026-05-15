@@ -47,6 +47,20 @@ if not _USE_SAGE3:
         )
         raise ImportError
 
+# ---------- GPU shared memory detection ----------
+# sage3 kernel with fp32 acc needs ~192KB shmem (3 × 128 × 128 × 4 bytes).
+# bf16_both_dot reduces to ~96KB but causes accuracy loss (black images in diffusion).
+# On GPUs with insufficient shmem for fp32, we fall back to torch SDPA.
+_SAGE3_SHMEM_THRESHOLD = 192 * 1024  # minimum shmem for fp32 sage3
+
+def _gpu_has_enough_shmem() -> bool:
+    """Check if GPU has enough shared memory for sage3 fp32 kernel."""
+    try:
+        shmem = torch.cuda.get_device_properties(0).shared_memory_per_multiprocessor
+        return shmem >= _SAGE3_SHMEM_THRESHOLD
+    except Exception:
+        return True  # optimistic default
+
 
 class SageAttentionBackend(AttentionBackend):
     accept_output_buffer: bool = True
@@ -62,44 +76,6 @@ class SageAttentionBackend(AttentionBackend):
     @staticmethod
     def get_impl_cls() -> type["SageAttentionImpl"]:
         return SageAttentionImpl
-
-
-def _auto_tile_size_q(head_dim: int) -> int:
-    """Pick tile_size_q that fits GPU shared memory, or return 0 to signal fallback.
-
-    The sage3 kernel with 128×128 tiles and head_dim=128 needs ~192KB shared memory
-    with fp32 accumulator. Using bf16 accumulators (~96KB) fits on most GPUs.
-    GPUs with shared memory < 96KB would need fallback.
-    """
-    try:
-        shmem = torch.cuda.get_device_properties(0).shared_memory_per_multiprocessor
-    except Exception:
-        return 128  # optimistic default
-
-    if shmem >= 200 * 1024:  # A100 (164KB), H100 (228KB) — fp32 fits
-        return 128
-    elif shmem >= 100 * 1024:  # RTX 6000D (100KB) — bf16 fits at 128
-        # Caller must also set acc_dtype=bf16_both_dot
-        return 128
-    else:
-        logger.warning(
-            "sage3: GPU shared memory (%dKB) may be insufficient. "
-            "Will attempt sage3 with bf16 accumulators.",
-            shmem // 1024,
-        )
-        return 64
-
-
-def _auto_acc_dtype(shmem_bytes: int, user_acc_dtype: str) -> str:
-    """If user didn't override, pick acc_dtype based on GPU shared memory."""
-    if user_acc_dtype != "fp32":
-        return user_acc_dtype  # user explicitly chose, respect it
-    if shmem_bytes >= 200 * 1024:
-        return "fp32"
-    # GPU needs bf16 accumulators to fit in shared memory
-    logger.info("sage3: auto-selecting acc_dtype=bf16_both_dot (GPU shmem=%dKB < 200KB)",
-                shmem_bytes // 1024)
-    return "bf16_both_dot"
 
 
 class SageAttentionImpl(AttentionImpl):
@@ -120,23 +96,29 @@ class SageAttentionImpl(AttentionImpl):
         # sage3 config from env or backend_kwargs
         self._sage3_config = os.environ.get("SAGE3_QUANT_FORMAT", "mxfp4")
         self._sage3_acc_dtype = os.environ.get("SAGE3_ACC_DTYPE", "fp32")
-        self._sage3_tile_q = int(os.environ.get("SAGE3_TILE_Q", "0"))  # 0 = auto
         if backend_kwargs:
             self._sage3_config = backend_kwargs.pop("sage3_config", self._sage3_config)
             self._sage3_acc_dtype = backend_kwargs.pop("sage3_acc_dtype", self._sage3_acc_dtype)
-            self._sage3_tile_q = backend_kwargs.pop("sage3_tile_q", self._sage3_tile_q)
             if backend_kwargs:
                 logger.warning("SageAttentionImpl ignoring backend_kwargs: %s",
                                list(backend_kwargs.keys()))
 
-        # Auto-detect tile_size_q and acc_dtype based on GPU shared memory
-        if _USE_SAGE3 and self._sage3_tile_q == 0:
-            self._sage3_tile_q = _auto_tile_size_q(head_size)
-            try:
-                shmem = torch.cuda.get_device_properties(0).shared_memory_per_multiprocessor
-            except Exception:
-                shmem = 200 * 1024
-            self._sage3_acc_dtype = _auto_acc_dtype(shmem, self._sage3_acc_dtype)
+        # Determine whether sage3 kernel can run on this GPU
+        self._use_sage3_kernel = False
+        if _USE_SAGE3:
+            if self._sage3_acc_dtype == "fp32" and not _gpu_has_enough_shmem():
+                try:
+                    shmem = torch.cuda.get_device_properties(0).shared_memory_per_multiprocessor
+                except Exception:
+                    shmem = 0
+                logger.warning(
+                    "sage3: GPU shmem (%dKB) < %dKB needed for fp32 kernel. "
+                    "Falling back to torch SDPA. Use a GPU with >= 192KB shmem "
+                    "(e.g. H100) or set SAGE3_ACC_DTYPE to force bf16 (may lose accuracy).",
+                    shmem // 1024, _SAGE3_SHMEM_THRESHOLD // 1024,
+                )
+            else:
+                self._use_sage3_kernel = True
 
     def forward_cuda(
         self,
@@ -146,15 +128,35 @@ class SageAttentionImpl(AttentionImpl):
         attn_metadata: AttentionMetadata = None,
     ) -> torch.Tensor:
         # Input layout: NHD = [B, N, H, D]
-        if _USE_SAGE3:
+        if self._use_sage3_kernel:
             return self._forward_sage3(query, key, value)
-        else:
+        elif _sageattn_v2 is not None:
             return _sageattn_v2(
                 query, key, value,
                 tensor_layout="NHD",
                 is_causal=self.causal,
                 sm_scale=self.softmax_scale,
             )
+        else:
+            return self._forward_sdpa(query, key, value)
+
+    def _forward_sdpa(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+    ) -> torch.Tensor:
+        """Fallback to torch scaled_dot_product_attention (always correct)."""
+        # Convert NHD → HND for SDPA
+        q = query.transpose(1, 2)
+        k = key.transpose(1, 2)
+        v = value.transpose(1, 2)
+        out = F.scaled_dot_product_attention(
+            q, k, v,
+            is_causal=self.causal,
+            scale=self.softmax_scale,
+        )
+        return out.transpose(1, 2)  # back to NHD
 
     def _forward_sage3(
         self,
@@ -163,27 +165,24 @@ class SageAttentionImpl(AttentionImpl):
         value: torch.Tensor,
     ) -> torch.Tensor:
         # sage3 expects HND = [B, H, N, D], input is NHD = [B, N, H, D]
-        q = query.transpose(1, 2)   # [B, H, N, D]
-        k = key.transpose(1, 2)
-        v = value.transpose(1, 2)
+        q = query.transpose(1, 2).contiguous()   # [B, H, N, D]
+        k = key.transpose(1, 2).contiguous()
+        v = value.transpose(1, 2).contiguous()
 
-        # Fall back to torch SDPA if:
-        # 1. sage3 can't fit in shared memory (tile_q=0)
-        # 2. Cross-attention (different Q/K seq lengths)
-        if self._sage3_tile_q == 0 or q.shape[2] != k.shape[2]:
+        # Cross-attention (different Q/K seq lengths) — sage3 can't handle
+        if q.shape[2] != k.shape[2]:
             out = F.scaled_dot_product_attention(
                 q, k, v,
                 is_causal=self.causal,
                 scale=self.softmax_scale,
             )
-            return out.transpose(1, 2)  # back to NHD
+            return out.transpose(1, 2)
 
         out = _sage3_fn(
             q, k, v,
             config=self._sage3_config,
             is_causal=self.causal,
             sm_scale=self.softmax_scale,
-            tile_size_q=self._sage3_tile_q,
             acc_dtype=self._sage3_acc_dtype,
         )
         return out.transpose(1, 2)  # back to NHD
