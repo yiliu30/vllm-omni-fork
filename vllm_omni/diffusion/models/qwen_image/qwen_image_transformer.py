@@ -710,10 +710,11 @@ class QwenImageTransformerBlock(nn.Module):
         # (see #2728).
         self.img_mod = nn.Sequential(
             nn.SiLU(),
-            ReplicatedLinear(
+            ColumnParallelLinear(
                 dim,
                 6 * dim,
                 bias=True,
+                gather_output=True,
                 return_bias=False,
                 quant_config=None,
                 prefix="img_mod.1",
@@ -734,10 +735,11 @@ class QwenImageTransformerBlock(nn.Module):
         # Text processing modules.
         self.txt_mod = nn.Sequential(
             nn.SiLU(),
-            ReplicatedLinear(
+            ColumnParallelLinear(
                 dim,
                 6 * dim,
                 bias=True,
+                gather_output=True,
                 return_bias=False,
                 quant_config=None,
                 prefix="txt_mod.1",
