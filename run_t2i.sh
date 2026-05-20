@@ -1,5 +1,6 @@
 MODEL=/mnt/disk1/yiliu7/Qwen/Qwen-Image/
 MODEL=/media/hf_models/Qwen/Qwen-Image
+# MODEL=/media/yiliu7/zai-org/CogVideoX-2b/
 # MODEL=/mnt/disk1/yiliu7/Yi30/Qwen-Image-W4A16
 # MODEL=/mnt/disk1/yiliu7/Qwen/Qwen-Image-W4A16-SKIP-IMG-MOD-TXT-MOD
 # export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libnccl.so.2.29.7
@@ -18,8 +19,8 @@ MODEL=/media/hf_models/Qwen/Qwen-Image
 
 # VLLM_MXFP4_USE_MARLIN=1 \
 source /home/yiliu7/workspace/venvs/omni/bin/activate
-SAGE3_QUANT_FORMAT=nvfp4 \
-DIFFUSION_ATTENTION_BACKEND=SAGE_ATTN \
+# SAGE3_QUANT_FORMAT=nvfp4 \
+# DIFFUSION_ATTENTION_BACKEND=SAGE_ATTN \
 CUDA_VISIBLE_DEVICES=2,3 python examples/offline_inference/text_to_image/text_to_image.py \
   --model $MODEL \
   --tensor-parallel-size 1 \

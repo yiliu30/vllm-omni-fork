@@ -7,7 +7,8 @@ True OCP Microscaling FP4 format:
   - Scale: uint8 (E8M0 exponent-only), per-group with block_size=32, shape [N, K/32]
   - No global scale (unlike NVFP4)
 
-CUDA Kernel Backends (auto-selected via init_mxfp4_linear_kernel()):
+CUDA Kernel Backends (auto-selected via init_mxfp4_linear_kernel() from
+  vllm_omni.quantization.kernels.mxfp4):
   - FlashInfer (SM100+ Blackwell): true W4A4 GEMM
   - Marlin (SM80+ Ampere/Hopper): W4A16 weight-only GEMM
 
@@ -85,7 +86,7 @@ class DiffusionMXFP4Config(QuantizationConfig):
     def kernel(self):
         """Lazily initialize and cache the MXFP4 GEMM kernel."""
         if self._kernel is None:
-            from vllm.model_executor.kernels.linear import (
+            from vllm_omni.quantization.mxfp4_kernels import (
                 init_mxfp4_linear_kernel,
             )
 
@@ -214,7 +215,8 @@ class CUDAMxfp4LinearMethod(LinearMethodBase):
     """CUDA MXFP4 offline linear method for pre-quantized checkpoints.
 
     Delegates weight processing and GEMM to the kernel selected by
-    init_mxfp4_linear_kernel() (FlashInfer on SM100+, Marlin on SM80+).
+    init_mxfp4_linear_kernel() (FlashInfer on SM100+, Marlin on SM80+),
+    sourced from vllm_omni.quantization.kernels.mxfp4.
     """
 
     def __init__(self, quant_config: DiffusionMXFP4Config) -> None:
