@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FLUX.1-dev Benchmark Dashboard — bf16 vs W4A16</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1419; color: #e7e9ea; padding: 2rem; }
+h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+.subtitle { color: #71767b; margin-bottom: 2rem; font-size: 0.95rem; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+.card { background: #1a1f26; border-radius: 12px; padding: 1.5rem; border: 1px solid #2f3640; }
+.card h2 { font-size: 1.1rem; margin-bottom: 1rem; color: #1d9bf0; }
+.card h3 { font-size: 0.9rem; margin-bottom: 0.8rem; color: #71767b; }
+.stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+.stat-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+.stat { text-align: center; }
+.stat .value { font-size: 1.5rem; font-weight: 700; color: #1d9bf0; }
+.stat .value.green { color: #00ba7c; }
+.stat .value.orange { color: #ff7a00; }
+.stat .label { font-size: 0.72rem; color: #71767b; text-transform: uppercase; letter-spacing: 0.05em; }
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+th, td { padding: 0.6rem 0.8rem; text-align: right; border-bottom: 1px solid #2f3640; }
+th { color: #71767b; font-weight: 600; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; }
+td:first-child, th:first-child { text-align: left; }
+tr:hover td { background: #1e2730; }
+.badge { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; }
+.badge-yes { background: #0d3b2e; color: #00ba7c; }
+.badge-no { background: #3b1c1c; color: #f4212e; }
+.badge-na { background: #2f3640; color: #71767b; }
+.chart-container { position: relative; height: 280px; }
+.section { margin-bottom: 2rem; }
+.section > h2 { font-size: 1.3rem; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid #2f3640; }
+.highlight { color: #00ba7c; font-weight: 600; }
+.env-info { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1.5rem; }
+.env-tag { background: #2f3640; padding: 0.3rem 0.7rem; border-radius: 6px; font-size: 0.8rem; }
+pre { background: #0d1117; padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.8rem; color: #c9d1d9; line-height: 1.6; }
+.cmd-comment { color: #71767b; }
+</style>
+</head>
+<body>
+
+<h1>FLUX.1-dev Benchmark Dashboard</h1>
+<p class="subtitle">bf16 vs W4A16 (AutoRound) — vLLM-Omni Online Serving — RTX 5090 D (32GB)</p>
+
+<div class="env-info">
+  <span class="env-tag">Model: FLUX.1-dev (~12B params)</span>
+  <span class="env-tag">GPU: NVIDIA RTX 5090 D 32GB</span>
+  <span class="env-tag">Framework: vLLM-Omni v0.20.1.dev25</span>
+  <span class="env-tag">Dataset: VBench (10 prompts)</span>
+  <span class="env-tag">Date: 2026-05-29</span>
+</div>
+
+<!-- Key Metrics -->
+<div class="grid">
+  <div class="card">
+    <h2>Best Single-Image Latency (1024×1024)</h2>
+    <div class="stat-grid">
+      <div class="stat"><div class="value orange">8.08s</div><div class="label">bf16 TP=4</div></div>
+      <div class="stat"><div class="value green">7.84s</div><div class="label">W4A16 TP=4</div></div>
+      <div class="stat"><div class="value orange">8.37s</div><div class="label">bf16 TP=2</div></div>
+      <div class="stat"><div class="value green">8.23s</div><div class="label">W4A16 TP=1 🎉</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Memory per GPU (model loading)</h2>
+    <div class="stat-grid-3">
+      <div class="stat"><div class="value orange">22.7 GB</div><div class="label">bf16 TP=2</div></div>
+      <div class="stat"><div class="value orange">18.0 GB</div><div class="label">bf16 TP=4</div></div>
+      <div class="stat"><div class="value">—</div><div class="label">bf16 TP=1 (OOM)</div></div>
+      <div class="stat"><div class="value green">15.9 GB</div><div class="label">W4A16 TP=1</div></div>
+      <div class="stat"><div class="value green">10.3 GB</div><div class="label">W4A16 TP=2</div></div>
+      <div class="stat"><div class="value green">7.4 GB</div><div class="label">W4A16 TP=4</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Charts -->
+<div class="grid">
+  <div class="card">
+    <h2>Latency Comparison: bf16 vs W4A16 (concurrency=1)</h2>
+    <div class="chart-container"><canvas id="chartComparison"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Latency vs Concurrency (1024×1024, 20 steps)</h2>
+    <div class="chart-container"><canvas id="chartConcurrency"></canvas></div>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>GPU Memory per Worker (model load)</h2>
+    <div class="chart-container"><canvas id="chartMemory"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Resolution & Steps (TP=4, concurrency=1)</h2>
+    <div class="chart-container"><canvas id="chartResolution"></canvas></div>
+  </div>
+</div>
+
+<!-- Detailed Comparison Table -->
+<div class="section">
+  <h2>Full Results: bf16 vs W4A16 (1024×1024, 20 steps)</h2>
+  <div class="card">
+    <table>
+      <thead><tr><th>TP</th><th>Conc.</th><th>bf16 Mean (s)</th><th>W4A16 Mean (s)</th><th>Speedup</th><th>bf16 P99 (s)</th><th>W4A16 P99 (s)</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>1</td><td>OOM</td><td>8.23</td><td>—</td><td>OOM</td><td>8.29</td></tr>
+        <tr><td>1</td><td>2</td><td>OOM</td><td>15.01</td><td>—</td><td>OOM</td><td>16.07</td></tr>
+        <tr><td>1</td><td>4</td><td>OOM</td><td>26.91</td><td>—</td><td>OOM</td><td>31.91</td></tr>
+        <tr><td>1</td><td>8</td><td>OOM</td><td>41.25</td><td>—</td><td>OOM</td><td>63.32</td></tr>
+        <tr><td>2</td><td>1</td><td>8.37</td><td>8.06</td><td>1.04×</td><td>8.42</td><td>8.11</td></tr>
+        <tr><td>2</td><td>2</td><td>15.20</td><td>14.58</td><td>1.04×</td><td>16.27</td><td>15.71</td></tr>
+        <tr><td>2</td><td>4</td><td>27.24</td><td>26.12</td><td>1.04×</td><td>32.25</td><td>30.89</td></tr>
+        <tr><td>2</td><td>8</td><td>41.77</td><td>40.02</td><td>1.04×</td><td>64.09</td><td>61.41</td></tr>
+        <tr><td>4</td><td>1</td><td>8.08</td><td>7.84</td><td>1.03×</td><td>8.11</td><td>7.90</td></tr>
+        <tr><td>4</td><td>2</td><td>14.62</td><td>14.15</td><td>1.03×</td><td>15.65</td><td>15.20</td></tr>
+        <tr><td>4</td><td>4</td><td>26.15</td><td>25.34</td><td>1.03×</td><td>30.99</td><td>30.06</td></tr>
+        <tr><td>4</td><td>8</td><td>40.11</td><td>38.84</td><td>1.03×</td><td>61.53</td><td>59.55</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Resolution Sweep -->
+<div class="section">
+  <h2>Resolution & Steps Sweep (TP=4, concurrency=1)</h2>
+  <div class="card">
+    <table>
+      <thead><tr><th>Resolution</th><th>Steps</th><th>bf16 Mean (s)</th><th>W4A16 Mean (s)</th><th>Speedup</th></tr></thead>
+      <tbody>
+        <tr><td>512×512</td><td>20</td><td>2.59</td><td>2.47</td><td>1.05×</td></tr>
+        <tr><td>1024×1024</td><td>20</td><td>8.08</td><td>7.84</td><td>1.03×</td></tr>
+        <tr><td>1024×1024</td><td>50</td><td>19.22</td><td>18.65</td><td>1.03×</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Feature Matrix -->
+<div class="section">
+  <h2>Feature Support & Key Findings</h2>
+  <div class="grid">
+    <div class="card">
+      <h2>Feature Support</h2>
+      <table>
+        <thead><tr><th>Feature</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>Tensor Parallel</td><td><span class="badge badge-yes">Yes</span></td><td>TP=1,2,4 tested</td></tr>
+          <tr><td>W4A16 Quantization</td><td><span class="badge badge-yes">Yes</span></td><td>AutoRound, fits single GPU</td></tr>
+          <tr><td>CFG Parallel</td><td><span class="badge badge-no">N/A</span></td><td>FLUX is guidance-distilled</td></tr>
+          <tr><td>Ulysses (USP)</td><td><span class="badge badge-no">No</span></td><td>Not implemented</td></tr>
+          <tr><td>Step Execution</td><td><span class="badge badge-no">No</span></td><td>No continuous batching</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h2>Key Findings</h2>
+      <ul style="list-style: none; line-height: 2.2; font-size: 0.9rem;">
+        <li>&#x2022; W4A16 enables <span class="highlight">single-GPU inference</span> (15.9 GB vs OOM for bf16)</li>
+        <li>&#x2022; W4A16 is <span class="highlight">3-5% faster</span> than bf16 at same TP (less data to move)</li>
+        <li>&#x2022; W4A16 TP=1 (8.23s) ≈ bf16 TP=4 (8.08s) — same latency, 4× fewer GPUs</li>
+        <li>&#x2022; Memory savings: ~30% at TP=2, ~59% at TP=4</li>
+        <li>&#x2022; No continuous batching — throughput flat regardless of concurrency</li>
+        <li>&#x2022; Latency scales linearly with steps, quadratically with resolution</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- Reproduction Commands -->
+<div class="section">
+  <h2>Reproduction Commands</h2>
+  <div class="card">
+    <h3>Quick Start (Python script)</h3>
+    <pre><span class="cmd-comment"># Show all configs without running</span>
+python benchmarks/diffusion/reproduce_flux1_dev.py --dry-run
+
+<span class="cmd-comment"># Run everything (bf16 + w4a16, all TP sizes)</span>
+python benchmarks/diffusion/reproduce_flux1_dev.py
+
+<span class="cmd-comment"># Run only W4A16 model</span>
+python benchmarks/diffusion/reproduce_flux1_dev.py --model w4a16
+
+<span class="cmd-comment"># Run only TP=4 configs for both models</span>
+python benchmarks/diffusion/reproduce_flux1_dev.py --tp 4
+
+<span class="cmd-comment"># Single config: bf16, TP=2, concurrency=1</span>
+python benchmarks/diffusion/reproduce_flux1_dev.py --model bf16 --tp 2 -c 1</pre>
+  </div>
+
+  <div class="card" style="margin-top:1rem;">
+    <h3>Manual: bf16 TP=2</h3>
+    <pre><span class="cmd-comment"># Prerequisites</span>
+cd /home/yiliu7/workspace/vllm-omni
+export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libnccl.so.2.29.7
+PYTHON=/home/yiliu7/workspace/venvs/omni/bin/python
+MODEL=/mnt/disk1/yiliu7/black-forest-labs/FLUX.1-dev
+
+<span class="cmd-comment"># Launch server</span>
+$PYTHON -m vllm_omni.entrypoints.cli.main serve $MODEL \
+    --omni --tensor-parallel-size 2 --port 8099 --disable-log-stats &
+
+<span class="cmd-comment"># Wait for health</span>
+until curl -s http://localhost:8099/health; do sleep 5; done
+
+<span class="cmd-comment"># Benchmark</span>
+for C in 1 2 4 8; do
+  $PYTHON benchmarks/diffusion/diffusion_benchmark_serving.py \
+      --backend vllm-omni --base-url http://localhost:8099 \
+      --model $MODEL --task t2i --dataset vbench \
+      --num-prompts 10 --width 1024 --height 1024 \
+      --num-inference-steps 20 --max-concurrency $C \
+      --warmup-requests $C --warmup-concurrency $C \
+      --output-file results/bf16_tp2_c${C}.json
+done</pre>
+  </div>
+
+  <div class="card" style="margin-top:1rem;">
+    <h3>Manual: W4A16 TP=1 (single GPU)</h3>
+    <pre><span class="cmd-comment"># W4A16 quantized model on single GPU</span>
+MODEL=/mnt/disk1/lvl/FLUX.1-dev-AutoRound-w4a16
+
+<span class="cmd-comment"># Launch server (TP=1)</span>
+$PYTHON -m vllm_omni.entrypoints.cli.main serve $MODEL \
+    --omni --tensor-parallel-size 1 --port 8099 --disable-log-stats &
+
+until curl -s http://localhost:8099/health; do sleep 5; done
+
+<span class="cmd-comment"># Benchmark</span>
+for C in 1 2 4 8; do
+  $PYTHON benchmarks/diffusion/diffusion_benchmark_serving.py \
+      --backend vllm-omni --base-url http://localhost:8099 \
+      --model $MODEL --task t2i --dataset vbench \
+      --num-prompts 10 --width 1024 --height 1024 \
+      --num-inference-steps 20 --max-concurrency $C \
+      --warmup-requests $C --warmup-concurrency $C \
+      --output-file results/w4a16_tp1_c${C}.json
+done</pre>
+  </div>
+
+  <div class="card" style="margin-top:1rem;">
+    <h3>Manual: W4A16 TP=4 + Resolution Sweep</h3>
+    <pre><span class="cmd-comment"># W4A16 with TP=4</span>
+MODEL=/mnt/disk1/lvl/FLUX.1-dev-AutoRound-w4a16
+
+$PYTHON -m vllm_omni.entrypoints.cli.main serve $MODEL \
+    --omni --tensor-parallel-size 4 --port 8099 --disable-log-stats &
+
+until curl -s http://localhost:8099/health; do sleep 5; done
+
+<span class="cmd-comment"># Concurrency sweep (1024x1024, 20 steps)</span>
+for C in 1 2 4 8; do
+  $PYTHON benchmarks/diffusion/diffusion_benchmark_serving.py \
+      --backend vllm-omni --base-url http://localhost:8099 \
+      --model $MODEL --task t2i --dataset vbench \
+      --num-prompts 10 --width 1024 --height 1024 \
+      --num-inference-steps 20 --max-concurrency $C \
+      --warmup-requests $C --warmup-concurrency $C \
+      --output-file results/w4a16_tp4_1024_c${C}.json
+done
+
+<span class="cmd-comment"># Resolution sweep (concurrency=1)</span>
+$PYTHON benchmarks/diffusion/diffusion_benchmark_serving.py \
+    --backend vllm-omni --base-url http://localhost:8099 \
+    --model $MODEL --task t2i --dataset vbench \
+    --num-prompts 10 --width 512 --height 512 \
+    --num-inference-steps 20 --max-concurrency 1 \
+    --warmup-requests 1 --warmup-concurrency 1 \
+    --output-file results/w4a16_tp4_512_c1.json
+
+<span class="cmd-comment"># 50 steps</span>
+$PYTHON benchmarks/diffusion/diffusion_benchmark_serving.py \
+    --backend vllm-omni --base-url http://localhost:8099 \
+    --model $MODEL --task t2i --dataset vbench \
+    --num-prompts 10 --width 1024 --height 1024 \
+    --num-inference-steps 50 --max-concurrency 1 \
+    --warmup-requests 1 --warmup-concurrency 1 \
+    --output-file results/w4a16_tp4_1024_s50_c1.json</pre>
+  </div>
+</div>
+
+<script>
+const colors = { blue: '#1d9bf0', green: '#00ba7c', orange: '#ff7a00', red: '#f4212e', purple: '#7856ff' };
+const chartOpts = (yLabel) => ({
+  responsive: true, maintainAspectRatio: false,
+  scales: { x: { ticks: { color: '#71767b' }, grid: { color: '#2f3640' } },
+            y: { title: { display: true, text: yLabel, color: '#71767b' }, ticks: { color: '#71767b' }, grid: { color: '#2f3640' } } },
+  plugins: { legend: { labels: { color: '#e7e9ea' } } }
+});
+
+// Comparison: bf16 vs W4A16 at concurrency=1
+new Chart(document.getElementById('chartComparison'), {
+  type: 'bar',
+  data: {
+    labels: ['TP=1', 'TP=2', 'TP=4'],
+    datasets: [
+      { label: 'bf16', data: [null, 8.37, 8.08], backgroundColor: colors.orange + '80', borderColor: colors.orange, borderWidth: 2 },
+      { label: 'W4A16', data: [8.23, 8.06, 7.84], backgroundColor: colors.green + '80', borderColor: colors.green, borderWidth: 2 }
+    ]
+  },
+  options: { ...chartOpts('Latency (s)'), plugins: { legend: { labels: { color: '#e7e9ea' } }, tooltip: { callbacks: { label: (ctx) => ctx.raw === null ? 'OOM' : `${ctx.dataset.label}: ${ctx.raw}s` } } } }
+});
+
+// Latency vs Concurrency
+new Chart(document.getElementById('chartConcurrency'), {
+  type: 'line',
+  data: {
+    labels: [1, 2, 4, 8],
+    datasets: [
+      { label: 'bf16 TP=2', data: [8.37, 15.20, 27.24, 41.77], borderColor: colors.orange, tension: 0.3 },
+      { label: 'bf16 TP=4', data: [8.08, 14.62, 26.15, 40.11], borderColor: colors.red, tension: 0.3 },
+      { label: 'W4A16 TP=1', data: [8.23, 15.01, 26.91, 41.25], borderColor: colors.purple, tension: 0.3 },
+      { label: 'W4A16 TP=2', data: [8.06, 14.58, 26.12, 40.02], borderColor: colors.blue, tension: 0.3 },
+      { label: 'W4A16 TP=4', data: [7.84, 14.15, 25.34, 38.84], borderColor: colors.green, tension: 0.3 }
+    ]
+  },
+  options: chartOpts('Mean Latency (s)')
+});
+
+// Memory comparison
+new Chart(document.getElementById('chartMemory'), {
+  type: 'bar',
+  data: {
+    labels: ['TP=1', 'TP=2', 'TP=4'],
+    datasets: [
+      { label: 'bf16', data: [null, 22.68, 17.96], backgroundColor: colors.orange + '80', borderColor: colors.orange, borderWidth: 2 },
+      { label: 'W4A16', data: [15.91, 10.33, 7.35], backgroundColor: colors.green + '80', borderColor: colors.green, borderWidth: 2 }
+    ]
+  },
+  options: { ...chartOpts('GPU Memory (GB)'), plugins: { legend: { labels: { color: '#e7e9ea' } }, tooltip: { callbacks: { label: (ctx) => ctx.raw === null ? 'OOM' : `${ctx.dataset.label}: ${ctx.raw} GB` } } } }
+});
+
+// Resolution & Steps
+new Chart(document.getElementById('chartResolution'), {
+  type: 'bar',
+  data: {
+    labels: ['512×512\n20 steps', '1024×1024\n20 steps', '1024×1024\n50 steps'],
+    datasets: [
+      { label: 'bf16', data: [2.59, 8.08, 19.22], backgroundColor: colors.orange + '80', borderColor: colors.orange, borderWidth: 2 },
+      { label: 'W4A16', data: [2.47, 7.84, 18.65], backgroundColor: colors.green + '80', borderColor: colors.green, borderWidth: 2 }
+    ]
+  },
+  options: chartOpts('Mean Latency (s)')
+});
+</script>
+
+</body>
+</html>
