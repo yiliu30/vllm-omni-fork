@@ -1,0 +1,306 @@
+/home/yiliu7/workspace/vllm-omni/vllm_omni/version.py:55: RuntimeWarning: vLLM and vLLM-Omni appear to have mismatched major/minor versions:
+ --> vLLM-Omni version 0.20.0rc2.dev52+ga106c4723
+ --> vLLM version 0.21.0
+This will likely cause compatibility issues.
+  warn_if_misaligned_vllm_version()
+INFO 05-30 09:29:25 [serve.py:111] Detected diffusion model: /home/yiliu7/models/FLUX.1-dev
+INFO 05-30 09:29:25 [logo.py:52]        [97m█     █     █▄   ▄█[0m    [34m   ▄▀▀[38;5;208m▀▀▄ [0m[97m█▄   ▄█ █▄    █ ▀█▀ [0m
+INFO 05-30 09:29:25 [logo.py:52]  [38;5;208m▄▄[0m [34m▄█[0m [97m█     █     █ ▀▄▀ █[0m[97m  ▄▄▄ [0m[34m █    [38;5;208m█ [0m[97m█ ▀▄▀ █ █ ▀▄  █  █  [0m
+INFO 05-30 09:29:25 [logo.py:52]   [38;5;208m█[0m[34m▄█▀[0m [97m█     █     █     █[0m[97m      [0m[34m █    [38;5;208m█ [0m[97m█     █ █   ▀▄█  █  [0m
+INFO 05-30 09:29:25 [logo.py:52]    [34m▀▀[0m  [97m▀▀▀▀▀ ▀▀▀▀▀ ▀     ▀[0m      [35m  ▀▀▀▀  [0m[97m▀     ▀ ▀     ▀ ▀▀▀ [0m
+INFO 05-30 09:29:25 [logo.py:52] 
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:29:25 [utils.py:306] vLLM server version 0.21.0, serving model /home/yiliu7/models/FLUX.1-dev
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:29:25 [utils.py:240] non-default args: {'model_tag': '/home/yiliu7/models/FLUX.1-dev', 'port': 8100, 'model': '/home/yiliu7/models/FLUX.1-dev', 'tokenizer_mode': None, 'trust_remote_code': None, 'dtype': None, 'enforce_eager': True, 'config_format': None, 'load_format': None, 'pipeline_parallel_size': None, 'tensor_parallel_size': 4, 'data_parallel_size': None, 'gpu_memory_utilization': None, 'mm_processor_cache_gb': None, 'skip_mm_profiling': None, 'compilation_config': None, 'profiler_config': None, 'disable_log_stats': True}
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:29:25 [omni_base.py:167] [AsyncOmni] Initializing with model /home/yiliu7/models/FLUX.1-dev
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:29:25 [async_omni_engine.py:248] [AsyncOmniEngine] Initializing with model /home/yiliu7/models/FLUX.1-dev
+[0;36m(APIServer pid=11222)[0;0m WARNING 05-30 09:29:25 [utils.py:191] Filtered out 1 callable object(s) from base_engine_args that are not compatible with OmegaConf: ['dispatch_function']. 
+[0;36m(APIServer pid=11222)[0;0m WARNING 05-30 09:29:25 [ring_globals.py:60] FlashInfer is unavailable; falling back to other attention backends. Reason: No module named 'flashinfer'
+[0;36m(APIServer pid=11222)[0;0m [transformers] `Siglip2ImageProcessorFast` is deprecated. The `Fast` suffix for image processors has been removed; use `Siglip2ImageProcessor` instead.
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:29:25 [async_omni_engine.py:310] [AsyncOmniEngine] Launching Orchestrator thread with 1 stages
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:29:25 [stage_init_utils.py:535] [stage_init] Stage-0 set runtime devices: 0,1,2,3
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:29:25 [multiproc_executor.py:138] Starting server...
+/home/yiliu7/workspace/vllm-omni/vllm_omni/version.py:55: RuntimeWarning: vLLM and vLLM-Omni appear to have mismatched major/minor versions:
+ --> vLLM-Omni version 0.20.0rc2.dev52+ga106c4723
+ --> vLLM version 0.21.0
+This will likely cause compatibility issues.
+  warn_if_misaligned_vllm_version()
+/home/yiliu7/workspace/vllm-omni/vllm_omni/version.py:55: RuntimeWarning: vLLM and vLLM-Omni appear to have mismatched major/minor versions:
+ --> vLLM-Omni version 0.20.0rc2.dev52+ga106c4723
+ --> vLLM version 0.21.0
+This will likely cause compatibility issues.
+  warn_if_misaligned_vllm_version()
+/home/yiliu7/workspace/vllm-omni/vllm_omni/version.py:55: RuntimeWarning: vLLM and vLLM-Omni appear to have mismatched major/minor versions:
+ --> vLLM-Omni version 0.20.0rc2.dev52+ga106c4723
+ --> vLLM version 0.21.0
+This will likely cause compatibility issues.
+  warn_if_misaligned_vllm_version()
+/home/yiliu7/workspace/vllm-omni/vllm_omni/version.py:55: RuntimeWarning: vLLM and vLLM-Omni appear to have mismatched major/minor versions:
+ --> vLLM-Omni version 0.20.0rc2.dev52+ga106c4723
+ --> vLLM version 0.21.0
+This will likely cause compatibility issues.
+  warn_if_misaligned_vllm_version()
+[32mINFO[0m [90m05-30 09:29:33[0m [90m[scheduler.py:239][0m Chunked prefill is enabled with max_num_batched_tokens=2048.
+[32mINFO[0m [90m05-30 09:29:33[0m [90m[vllm.py:886][0m Asynchronous scheduling is enabled.
+[32mINFO[0m [90m05-30 09:29:33[0m [90m[kernel.py:212][0m Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+[33mWARNING[0m [90m05-30 09:29:33[0m [90m[xpu.py:194][0m XPU Graph is disabled by environment variable, please set VLLM_XPU_ENABLE_XPU_GRAPH=1 to enable it.
+[32mINFO[0m [90m05-30 09:29:33[0m [90m[diffusion_worker.py:232][0m Final IR op priority after setting vLLM-Omni overrides: IrOpPriorityConfig(rms_norm=['xpu_kernels', 'native'], fused_add_rms_norm=['xpu_kernels', 'native'])
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[scheduler.py:239][0m Chunked prefill is enabled with max_num_batched_tokens=2048.
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[vllm.py:886][0m Asynchronous scheduling is enabled.
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[kernel.py:212][0m Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+[33mWARNING[0m [90m05-30 09:29:34[0m [90m[xpu.py:194][0m XPU Graph is disabled by environment variable, please set VLLM_XPU_ENABLE_XPU_GRAPH=1 to enable it.
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[diffusion_worker.py:232][0m Final IR op priority after setting vLLM-Omni overrides: IrOpPriorityConfig(rms_norm=['xpu_kernels', 'native'], fused_add_rms_norm=['xpu_kernels', 'native'])
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[diffusion_worker.py:645][0m Worker 0 created result MessageQueue
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[scheduler.py:239][0m Chunked prefill is enabled with max_num_batched_tokens=2048.
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[vllm.py:886][0m Asynchronous scheduling is enabled.
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[kernel.py:212][0m Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+[33mWARNING[0m [90m05-30 09:29:34[0m [90m[xpu.py:194][0m XPU Graph is disabled by environment variable, please set VLLM_XPU_ENABLE_XPU_GRAPH=1 to enable it.
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[diffusion_worker.py:232][0m Final IR op priority after setting vLLM-Omni overrides: IrOpPriorityConfig(rms_norm=['xpu_kernels', 'native'], fused_add_rms_norm=['xpu_kernels', 'native'])
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[scheduler.py:239][0m Chunked prefill is enabled with max_num_batched_tokens=2048.
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[vllm.py:886][0m Asynchronous scheduling is enabled.
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[kernel.py:212][0m Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+[33mWARNING[0m [90m05-30 09:29:34[0m [90m[xpu.py:194][0m XPU Graph is disabled by environment variable, please set VLLM_XPU_ENABLE_XPU_GRAPH=1 to enable it.
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[diffusion_worker.py:232][0m Final IR op priority after setting vLLM-Omni overrides: IrOpPriorityConfig(rms_norm=['xpu_kernels', 'native'], fused_add_rms_norm=['xpu_kernels', 'native'])
+[rank1]:[W530 09:29:34.718451582 ProcessGroupGloo.cpp:524] Warning: Unable to resolve hostname to a (local) address. Using the loopback address as fallback. Manually set the network interface to bind to with GLOO_SOCKET_IFNAME. (function operator())
+[rank2]:[W530 09:29:34.731850436 ProcessGroupGloo.cpp:524] Warning: Unable to resolve hostname to a (local) address. Using the loopback address as fallback. Manually set the network interface to bind to with GLOO_SOCKET_IFNAME. (function operator())
+[rank3]:[W530 09:29:34.242110827 ProcessGroupGloo.cpp:524] Warning: Unable to resolve hostname to a (local) address. Using the loopback address as fallback. Manually set the network interface to bind to with GLOO_SOCKET_IFNAME. (function operator())
+[rank0]:[W530 09:29:34.245273303 ProcessGroupGloo.cpp:524] Warning: Unable to resolve hostname to a (local) address. Using the loopback address as fallback. Manually set the network interface to bind to with GLOO_SOCKET_IFNAME. (function operator())
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[diffusion_worker.py:243][0m Worker 2: Initialized device and distributed environment.
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[diffusion_worker.py:243][0m Worker 1: Initialized device and distributed environment.
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[diffusion_worker.py:243][0m Worker 0: Initialized device and distributed environment.
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[diffusion_worker.py:243][0m Worker 3: Initialized device and distributed environment.
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[parallel_state.py:588][0m Building SP subgroups from explicit sp_group_ranks (sp_size=1, ulysses=1, ring=1, use_ulysses_low=True).
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[parallel_state.py:588][0m Building SP subgroups from explicit sp_group_ranks (sp_size=1, ulysses=1, ring=1, use_ulysses_low=True).
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[parallel_state.py:588][0m Building SP subgroups from explicit sp_group_ranks (sp_size=1, ulysses=1, ring=1, use_ulysses_low=True).
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[parallel_state.py:588][0m Building SP subgroups from explicit sp_group_ranks (sp_size=1, ulysses=1, ring=1, use_ulysses_low=True).
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[parallel_state.py:630][0m SP group details for rank 2: sp_group=[2], ulysses_group=[2], ring_group=[2]
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[parallel_state.py:630][0m SP group details for rank 1: sp_group=[1], ulysses_group=[1], ring_group=[1]
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[parallel_state.py:630][0m SP group details for rank 0: sp_group=[0], ulysses_group=[0], ring_group=[0]
+[32mINFO[0m [90m05-30 09:29:34[0m [90m[parallel_state.py:630][0m SP group details for rank 3: sp_group=[3], ulysses_group=[3], ring_group=[3]
+[33mWARNING[0m [90m05-30 09:29:35[0m [90m[ring_globals.py:60][0m FlashInfer is unavailable; falling back to other attention backends. Reason: No module named 'flashinfer'
+[33mWARNING[0m [90m05-30 09:29:35[0m [90m[ring_globals.py:60][0m FlashInfer is unavailable; falling back to other attention backends. Reason: No module named 'flashinfer'
+[33mWARNING[0m [90m05-30 09:29:35[0m [90m[ring_globals.py:60][0m FlashInfer is unavailable; falling back to other attention backends. Reason: No module named 'flashinfer'
+[33mWARNING[0m [90m05-30 09:29:35[0m [90m[ring_globals.py:60][0m FlashInfer is unavailable; falling back to other attention backends. Reason: No module named 'flashinfer'
+Loading weights:   0%|          | 0/196 [00:00<?, ?it/s]Loading weights:   0%|          | 0/196 [00:00<?, ?it/s]Loading weights:   0%|          | 0/196 [00:00<?, ?it/s]Loading weights:  30%|███       | 59/196 [00:00<00:00, 589.75it/s]Loading weights:  69%|██████▉   | 135/196 [00:00<00:00, 1309.20it/s]Loading weights:  77%|███████▋  | 150/196 [00:00<00:00, 1350.75it/s]Loading weights:  95%|█████████▍| 186/196 [00:00<00:00, 962.47it/s]Loading weights: 100%|██████████| 196/196 [00:00<00:00, 938.57it/s]
+Loading weights: 100%|██████████| 196/196 [00:00<00:00, 1281.96it/s]
+Loading weights: 100%|██████████| 196/196 [00:00<00:00, 1373.83it/s]
+Loading weights:   0%|          | 0/196 [00:00<?, ?it/s]Loading weights: 100%|██████████| 196/196 [00:00<00:00, 2770.50it/s]
+[32mINFO[0m [90m05-30 09:29:36[0m [90m[selector.py:87][0m Resolved diffusion attention backend 'SDPA' for role='self' via platform default
+[32mINFO[0m [90m05-30 09:29:36[0m [90m[selector.py:87][0m Resolved diffusion attention backend 'SDPA' for role='self' via platform default
+[33mWARNING[0m [90m05-30 09:29:36[0m [90m[layer.py:184][0m Attention backend SDPA does not support kv_cache_dtype='auto' on xpu. KV quantization will be disabled.
+[32mINFO[0m [90m05-30 09:29:36[0m [90m[selector.py:87][0m Resolved diffusion attention backend 'SDPA' for role='self' via platform default
+[32mINFO[0m [90m05-30 09:29:36[0m [90m[selector.py:87][0m Resolved diffusion attention backend 'SDPA' for role='self' via platform default
+Multi-thread loading shards:   0% Completed | 0/3 [00:00<?, ?it/s]
+Multi-thread loading shards:  33% Completed | 1/3 [00:08<00:17,  8.62s/it]
+Multi-thread loading shards:  67% Completed | 2/3 [00:09<00:04,  4.04s/it]
+Multi-thread loading shards: 100% Completed | 3/3 [00:11<00:00,  3.18s/it]
+Multi-thread loading shards: 100% Completed | 3/3 [00:11<00:00,  3.87s/it]
+
+Multi-thread loading shards:   0% Completed | 0/2 [00:00<?, ?it/s]
+Multi-thread loading shards:  50% Completed | 1/2 [00:01<00:01,  1.82s/it]
+Multi-thread loading shards: 100% Completed | 2/2 [00:03<00:00,  1.87s/it]
+Multi-thread loading shards: 100% Completed | 2/2 [00:03<00:00,  1.86s/it]
+
+[32mINFO[0m [90m05-30 09:29:52[0m [90m[diffusers_loader.py:375][0m Loading weights took 15.36 seconds
+[32mINFO[0m [90m05-30 09:29:52[0m [90m[diffusion_model_runner.py:144][0m Model loading took 17.2801 GiB and 17.862348 seconds
+[32mINFO[0m [90m05-30 09:29:52[0m [90m[diffusion_model_runner.py:149][0m Model runner: Model loaded successfully.
+[32mINFO[0m [90m05-30 09:29:52[0m [90m[diffusion_model_runner.py:190][0m Model runner: Initialization complete.
+[33mWARNING[0m [90m05-30 09:29:52[0m [90m[gpu_memory_utils.py:88][0m NVML init failed, will use profiling fallback: NVML Shared Library Not Found
+[32mINFO[0m [90m05-30 09:29:52[0m [90m[manager.py:96][0m Initializing DiffusionLoRAManager: device=xpu:0, dtype=torch.bfloat16, max_cached_adapters=1, static_lora_path=None
+[32mINFO[0m [90m05-30 09:29:52[0m [90m[diffusion_worker.py:202][0m Worker 0: Initialization complete.
+[32mINFO[0m [90m05-30 09:29:52[0m [90m[diffusion_worker.py:808][0m Worker 0: Scheduler loop started.
+[32mINFO[0m [90m05-30 09:29:52[0m [90m[diffusion_worker.py:718][0m Worker 0 ready to receive requests via shared memory
+[32mINFO[0m [90m05-30 09:29:53[0m [90m[diffusion_model_runner.py:144][0m Model loading took 17.2801 GiB and 18.977386 seconds
+[32mINFO[0m [90m05-30 09:29:53[0m [90m[diffusion_model_runner.py:149][0m Model runner: Model loaded successfully.
+[32mINFO[0m [90m05-30 09:29:53[0m [90m[diffusion_model_runner.py:190][0m Model runner: Initialization complete.
+[32mINFO[0m [90m05-30 09:29:53[0m [90m[diffusion_model_runner.py:144][0m Model loading took 17.2801 GiB and 19.105055 seconds
+[32mINFO[0m [90m05-30 09:29:53[0m [90m[diffusion_model_runner.py:149][0m Model runner: Model loaded successfully.
+[32mINFO[0m [90m05-30 09:29:53[0m [90m[diffusion_model_runner.py:190][0m Model runner: Initialization complete.
+[33mWARNING[0m [90m05-30 09:29:54[0m [90m[gpu_memory_utils.py:88][0m NVML init failed, will use profiling fallback: NVML Shared Library Not Found
+[32mINFO[0m [90m05-30 09:29:54[0m [90m[manager.py:96][0m Initializing DiffusionLoRAManager: device=xpu:2, dtype=torch.bfloat16, max_cached_adapters=1, static_lora_path=None
+[32mINFO[0m [90m05-30 09:29:54[0m [90m[diffusion_worker.py:202][0m Worker 2: Initialization complete.
+[32mINFO[0m [90m05-30 09:29:54[0m [90m[diffusion_worker.py:808][0m Worker 2: Scheduler loop started.
+[32mINFO[0m [90m05-30 09:29:54[0m [90m[diffusion_worker.py:718][0m Worker 2 ready to receive requests via shared memory
+[32mINFO[0m [90m05-30 09:29:54[0m [90m[diffusion_model_runner.py:144][0m Model loading took 17.2801 GiB and 19.191617 seconds
+[32mINFO[0m [90m05-30 09:29:54[0m [90m[diffusion_model_runner.py:149][0m Model runner: Model loaded successfully.
+[32mINFO[0m [90m05-30 09:29:54[0m [90m[diffusion_model_runner.py:190][0m Model runner: Initialization complete.
+[33mWARNING[0m [90m05-30 09:29:54[0m [90m[gpu_memory_utils.py:88][0m NVML init failed, will use profiling fallback: NVML Shared Library Not Found
+[32mINFO[0m [90m05-30 09:29:54[0m [90m[manager.py:96][0m Initializing DiffusionLoRAManager: device=xpu:1, dtype=torch.bfloat16, max_cached_adapters=1, static_lora_path=None
+[32mINFO[0m [90m05-30 09:29:54[0m [90m[diffusion_worker.py:202][0m Worker 1: Initialization complete.
+[32mINFO[0m [90m05-30 09:29:54[0m [90m[diffusion_worker.py:808][0m Worker 1: Scheduler loop started.
+[32mINFO[0m [90m05-30 09:29:54[0m [90m[diffusion_worker.py:718][0m Worker 1 ready to receive requests via shared memory
+[33mWARNING[0m [90m05-30 09:29:54[0m [90m[gpu_memory_utils.py:88][0m NVML init failed, will use profiling fallback: NVML Shared Library Not Found
+[32mINFO[0m [90m05-30 09:29:54[0m [90m[manager.py:96][0m Initializing DiffusionLoRAManager: device=xpu:3, dtype=torch.bfloat16, max_cached_adapters=1, static_lora_path=None
+[32mINFO[0m [90m05-30 09:29:54[0m [90m[diffusion_worker.py:202][0m Worker 3: Initialization complete.
+[32mINFO[0m [90m05-30 09:29:54[0m [90m[diffusion_worker.py:808][0m Worker 3: Scheduler loop started.
+[32mINFO[0m [90m05-30 09:29:54[0m [90m[diffusion_worker.py:718][0m Worker 3 ready to receive requests via shared memory
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:29:54 [diffusion_engine.py:699] dummy run to warm up the model
+[32mINFO[0m [90m05-30 09:29:54[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 1 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:29:54[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 3 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:29:54[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 0 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:29:54[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 2 independently receiving (from_tp=4, to_tp=4)
+2026:05:30-09:29:56:11559 |CCL_WARN| did not find MPI-launcher specific variables, switch to ATL/OFI, to force enable ATL/MPI set CCL_ATL_TRANSPORT=mpi
+2026:05:30-09:29:56:11559 |CCL_WARN| could not get local_idx/count from environment variables, trying to get them from ATL
+2026:05:30-09:29:56:11556 |CCL_WARN| did not find MPI-launcher specific variables, switch to ATL/OFI, to force enable ATL/MPI set CCL_ATL_TRANSPORT=mpi
+2026:05:30-09:29:56:11558 |CCL_WARN| did not find MPI-launcher specific variables, switch to ATL/OFI, to force enable ATL/MPI set CCL_ATL_TRANSPORT=mpi
+2026:05:30-09:29:56:11557 |CCL_WARN| did not find MPI-launcher specific variables, switch to ATL/OFI, to force enable ATL/MPI set CCL_ATL_TRANSPORT=mpi
+2026:05:30-09:29:56:11558 |CCL_WARN| could not get local_idx/count from environment variables, trying to get them from ATL
+2026:05:30-09:29:56:11556 |CCL_WARN| could not get local_idx/count from environment variables, trying to get them from ATL
+2026:05:30-09:29:56:11557 |CCL_WARN| could not get local_idx/count from environment variables, trying to get them from ATL
+2026:05:30-09:29:58:11556:[0] |CCL_WARN| topology recognition shows PCIe connection between devices. If this is not correct, you can disable topology recognition, with CCL_TOPO_FABRIC_VERTEX_CONNECTION_CHECK=0. This will assume XeLinks across devices
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [inline_stage_diffusion_client.py:67] [InlineStageDiffusionClient] stage-0 [rep-0] initialized inline (batch_size=1)
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [async_omni_engine.py:847] [AsyncOmniEngine] Stage 0 replica 0 initialized (diffusion, batch_size=1, devices=0,1,2,3)
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [orchestrator.py:153] [Orchestrator] Starting event loop
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [async_omni_engine.py:337] [AsyncOmniEngine] Orchestrator ready with 1 stages
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [omni_base.py:180] [AsyncOmni] AsyncOmniEngine initialized in 35.37 seconds
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [omni_base.py:199] [AsyncOmni] Initialized with 1 stages for model /home/yiliu7/models/FLUX.1-dev
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [api_server.py:573] Detected pure diffusion mode (single diffusion stage)
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [speaker_cache.py:45] Speaker cache ready (max_bytes=536870912)
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [serving_speech.py:211] Speaker storage: dir=/home/yiliu7/.cache/vllm-omni/speakers, max_speakers=1000, restored=0
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [api_server.py:635] Pure diffusion API server initialized for model: /home/yiliu7/models/FLUX.1-dev
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [api_server.py:419] Starting vLLM API server (pure diffusion mode) on http://0.0.0.0:8100
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:37] Available routes are:
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /openapi.json, Methods: HEAD, GET
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /docs, Methods: HEAD, GET
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /docs/oauth2-redirect, Methods: HEAD, GET
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /redoc, Methods: HEAD, GET
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /tokenize, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /detokenize, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /load, Methods: GET
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /version, Methods: GET
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /health, Methods: GET
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /metrics, Methods: GET
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /ping, Methods: GET
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /ping, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /invocations, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/chat/completions/batch, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/responses, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/responses/{response_id}, Methods: GET
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/responses/{response_id}/cancel, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/completions, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/messages, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/messages/count_tokens, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /inference/v1/generate, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /scale_elastic_ep, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /is_scaling_elastic_ep, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /generative_scoring, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/chat/completions/render, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/completions/render, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/chat/completions, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/audio/speech, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/audio/speech/batch, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/audio/generate, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/audio/voices, Methods: GET
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/audio/voices, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/audio/voices/{name}, Methods: DELETE
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /health, Methods: GET
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/models, Methods: GET
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/images/generations, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/images/edits, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/videos, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/videos/sync, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/videos, Methods: GET
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/videos/{video_id}, Methods: GET
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/videos/{video_id}, Methods: DELETE
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/videos/{video_id}/content, Methods: GET
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/omni/sleep, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:46] Route: /v1/omni/wakeup, Methods: POST
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:57] Route: /v1/audio/speech/stream, Endpoint: streaming_speech
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:57] Route: /v1/video/chat/stream, Endpoint: streaming_video_chat
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:30:00 [launcher.py:57] Route: /v1/realtime, Endpoint: realtime_websocket
+[0;36m(APIServer pid=11222)[0;0m INFO:     Started server process [11222]
+[0;36m(APIServer pid=11222)[0;0m INFO:     Waiting for application startup.
+[0;36m(APIServer pid=11222)[0;0m INFO:     Application startup complete.
+[0;36m(APIServer pid=11222)[0;0m INFO:     127.0.0.1:59308 - "GET /health HTTP/1.1" 200 OK
+[32mINFO[0m [90m05-30 09:30:01[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 0 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:30:01[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 1 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:30:01[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 2 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:30:01[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 3 independently receiving (from_tp=4, to_tp=4)
+[0;36m(APIServer pid=11222)[0;0m INFO:     127.0.0.1:59316 - "POST /v1/images/generations HTTP/1.1" 200 OK
+[32mINFO[0m [90m05-30 09:30:14[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 0 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:30:14[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 1 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:30:14[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 2 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:30:14[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 3 independently receiving (from_tp=4, to_tp=4)
+[0;36m(APIServer pid=11222)[0;0m INFO:     127.0.0.1:36748 - "POST /v1/images/generations HTTP/1.1" 200 OK
+[32mINFO[0m [90m05-30 09:30:26[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 0 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:30:26[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 1 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:30:26[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 2 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:30:26[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 3 independently receiving (from_tp=4, to_tp=4)
+[0;36m(APIServer pid=11222)[0;0m INFO:     127.0.0.1:48258 - "POST /v1/images/generations HTTP/1.1" 200 OK
+[32mINFO[0m [90m05-30 09:30:39[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 0 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:30:39[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 1 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:30:39[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 2 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:30:39[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 3 independently receiving (from_tp=4, to_tp=4)
+[0;36m(APIServer pid=11222)[0;0m INFO:     127.0.0.1:39308 - "POST /v1/images/generations HTTP/1.1" 200 OK
+[32mINFO[0m [90m05-30 09:30:51[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 2 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:30:51[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 1 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:30:51[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 0 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:30:51[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 3 independently receiving (from_tp=4, to_tp=4)
+[0;36m(APIServer pid=11222)[0;0m INFO:     127.0.0.1:45988 - "POST /v1/images/generations HTTP/1.1" 200 OK
+[32mINFO[0m [90m05-30 09:31:28[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 0 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:31:28[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 1 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:31:28[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 2 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:31:28[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 3 independently receiving (from_tp=4, to_tp=4)
+[0;36m(APIServer pid=11222)[0;0m INFO:     127.0.0.1:37730 - "POST /v1/images/generations HTTP/1.1" 200 OK
+[32mINFO[0m [90m05-30 09:32:05[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 2 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:32:05[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 0 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:32:05[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 1 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:32:05[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 3 independently receiving (from_tp=4, to_tp=4)
+[0;36m(APIServer pid=11222)[0;0m INFO:     127.0.0.1:35432 - "POST /v1/images/generations HTTP/1.1" 200 OK
+[32mINFO[0m [90m05-30 09:32:42[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 0 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:32:42[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 1 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:32:42[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 3 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:32:42[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 2 independently receiving (from_tp=4, to_tp=4)
+[0;36m(APIServer pid=11222)[0;0m INFO:     127.0.0.1:55686 - "POST /v1/images/generations HTTP/1.1" 200 OK
+[32mINFO[0m [90m05-30 09:33:19[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 0 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:33:19[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 1 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:33:19[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 3 independently receiving (from_tp=4, to_tp=4)
+[32mINFO[0m [90m05-30 09:33:19[0m [90m[kv_transfer_manager.py:1273][0m Rank-aware KV receive: rank 2 independently receiving (from_tp=4, to_tp=4)
+[33mWARNING[0m [90m05-30 09:35:13[0m [90m[diffusion_worker.py:687][0m SHM pack failed for model output: level_zero backend failed with error: 39 (UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY)
+[31mERROR[0m [90m05-30 09:35:14[0m [90m[diffusion_worker.py:753][0m Error processing RPC: level_zero backend failed with error: 39 (UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY)
+[31mERROR[0m [90m05-30 09:35:14[0m [90m[diffusion_worker.py:753][0m Traceback (most recent call last):
+[31mERROR[0m [90m05-30 09:35:14[0m [90m[diffusion_worker.py:753][0m   File "/home/yiliu7/workspace/vllm-omni/vllm_omni/diffusion/worker/diffusion_worker.py", line 751, in worker_busy_loop
+[31mERROR[0m [90m05-30 09:35:14[0m [90m[diffusion_worker.py:753][0m     self.return_result(result)
+[31mERROR[0m [90m05-30 09:35:14[0m [90m[diffusion_worker.py:753][0m   File "/home/yiliu7/workspace/vllm-omni/vllm_omni/diffusion/worker/diffusion_worker.py", line 688, in return_result
+[31mERROR[0m [90m05-30 09:35:14[0m [90m[diffusion_worker.py:753][0m     self.result_mq.enqueue(output)
+[31mERROR[0m [90m05-30 09:35:14[0m [90m[diffusion_worker.py:753][0m   File "/home/yiliu7/workspace/vllm/vllm/distributed/device_communicators/shm_broadcast.py", line 719, in enqueue
+[31mERROR[0m [90m05-30 09:35:14[0m [90m[diffusion_worker.py:753][0m     all_buffers[0] = pickle.dumps(
+[31mERROR[0m [90m05-30 09:35:14[0m [90m[diffusion_worker.py:753][0m                      ^^^^^^^^^^^^^
+[31mERROR[0m [90m05-30 09:35:14[0m [90m[diffusion_worker.py:753][0m   File "/home/yiliu7/workspace/venvs/omni/lib/python3.12/site-packages/torch/storage.py", line 1249, in __reduce__
+[31mERROR[0m [90m05-30 09:35:14[0m [90m[diffusion_worker.py:753][0m     torch.save(self, b, _use_new_zipfile_serialization=False)
+[31mERROR[0m [90m05-30 09:35:14[0m [90m[diffusion_worker.py:753][0m   File "/home/yiliu7/workspace/venvs/omni/lib/python3.12/site-packages/torch/serialization.py", line 1019, in save
+[31mERROR[0m [90m05-30 09:35:14[0m [90m[diffusion_worker.py:753][0m     _legacy_save(obj, opened_file, pickle_module, pickle_protocol)
+[31mERROR[0m [90m05-30 09:35:14[0m [90m[diffusion_worker.py:753][0m   File "/home/yiliu7/workspace/venvs/omni/lib/python3.12/site-packages/torch/serialization.py", line 1179, in _legacy_save
+[31mERROR[0m [90m05-30 09:35:14[0m [90m[diffusion_worker.py:753][0m     storage._write_file(
+[31mERROR[0m [90m05-30 09:35:14[0m [90m[diffusion_worker.py:753][0m RuntimeError: level_zero backend failed with error: 39 (UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY)
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [inline_stage_diffusion_client.py:130] Diffusion request img_gen-aac7596ef051601d failed: level_zero backend failed with error: 39 (UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY)
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [inline_stage_diffusion_client.py:130] Traceback (most recent call last):
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [inline_stage_diffusion_client.py:130]   File "/home/yiliu7/workspace/vllm-omni/vllm_omni/diffusion/inline_stage_diffusion_client.py", line 121, in _dispatch_request
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [inline_stage_diffusion_client.py:130]     results = await self._engine.step(request)
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [inline_stage_diffusion_client.py:130]               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [inline_stage_diffusion_client.py:130]   File "/home/yiliu7/workspace/vllm-omni/vllm_omni/diffusion/diffusion_engine.py", line 206, in step
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [inline_stage_diffusion_client.py:130]     raise RuntimeError(output.error)
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [inline_stage_diffusion_client.py:130] RuntimeError: level_zero backend failed with error: 39 (UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY)
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [async_omni.py:619] [AsyncOmni] final_output_loop failed.
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [async_omni.py:619] Traceback (most recent call last):
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [async_omni.py:619]   File "/home/yiliu7/workspace/vllm-omni/vllm_omni/entrypoints/async_omni.py", line 585, in _final_output_loop
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [async_omni.py:619]     should_continue, _, stage_id, req_state = self._handle_output_message(msg)
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [async_omni.py:619]                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [async_omni.py:619]   File "/home/yiliu7/workspace/vllm-omni/vllm_omni/entrypoints/omni_base.py", line 329, in _handle_output_message
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [async_omni.py:619]     raise RuntimeError(error_text)
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [async_omni.py:619] RuntimeError: level_zero backend failed with error: 39 (UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY)
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [async_omni.py:514] [AsyncOmni] Orchestrator error for req=img_gen-aac7596ef051601d stage-0: level_zero backend failed with error: 39 (UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY)
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:35:14 [async_omni.py:359] [AsyncOmni] Request img_gen-aac7596ef051601d failed (input error): {'request_id': 'img_gen-aac7596ef051601d', 'error': 'level_zero backend failed with error: 39 (UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY)'}
+[0;36m(APIServer pid=11222)[0;0m INFO 05-30 09:35:14 [orchestrator.py:348] [Orchestrator] Aborted request(s) ['img_gen-aac7596ef051601d']
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [api_server.py:1657] Image generation failed: {'request_id': 'img_gen-aac7596ef051601d', 'error': 'level_zero backend failed with error: 39 (UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY)'}
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [api_server.py:1657] Traceback (most recent call last):
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [api_server.py:1657]   File "/home/yiliu7/workspace/vllm-omni/vllm_omni/entrypoints/openai/api_server.py", line 1612, in generate_images
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [api_server.py:1657]     result = await _generate_with_async_omni(
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [api_server.py:1657]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [api_server.py:1657]   File "/home/yiliu7/workspace/vllm-omni/vllm_omni/entrypoints/openai/api_server.py", line 2088, in _generate_with_async_omni
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [api_server.py:1657]     async for output in engine_client.generate(
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [api_server.py:1657]   File "/home/yiliu7/workspace/vllm-omni/vllm_omni/entrypoints/async_omni.py", line 338, in generate
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [api_server.py:1657]     async for output in self._process_orchestrator_results(
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [api_server.py:1657]   File "/home/yiliu7/workspace/vllm-omni/vllm_omni/entrypoints/async_omni.py", line 520, in _process_orchestrator_results
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [api_server.py:1657]     raise RuntimeError(result)
+[0;36m(APIServer pid=11222)[0;0m ERROR 05-30 09:35:14 [api_server.py:1657] RuntimeError: {'request_id': 'img_gen-aac7596ef051601d', 'error': 'level_zero backend failed with error: 39 (UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY)'}
+[0;36m(APIServer pid=11222)[0;0m INFO:     127.0.0.1:44778 - "POST /v1/images/generations HTTP/1.1" 500 Internal Server Error

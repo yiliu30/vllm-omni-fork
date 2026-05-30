@@ -1,0 +1,84 @@
+[2026-05-30 09:22:23] ============================================================
+[2026-05-30 09:22:23] Stage 4: CFG Parallel Benchmark
+[2026-05-30 09:22:23]   Configs: 6
+[2026-05-30 09:22:23]   Runs per config: 3
+[2026-05-30 09:22:23]   CFG scale: 4.0
+[2026-05-30 09:22:23]   Output: /home/yiliu7/workspace/vllm-omni/benchmarks/diffusion/results/b60_flux1_dev_stage4_cfg
+[2026-05-30 09:22:23] ============================================================
+[2026-05-30 09:22:23] 
+[2026-05-30 09:22:23] ============================================================
+[2026-05-30 09:22:23] Server group: model=FLUX.1-dev-AutoRound-w4a16, TP=2, CFG=2
+[2026-05-30 09:22:23]   Configs in group: ['w4a16_tp2_cfg2_512x512_s20', 'w4a16_tp2_cfg2_1024x1024_s20', 'w4a16_tp2_cfg2_1536x1536_s20']
+[2026-05-30 09:22:23] ============================================================
+[2026-05-30 09:22:23]   CMD: /home/yiliu7/workspace/venvs/omni/bin/python -m vllm_omni.entrypoints.cli.main serve /home/yiliu7/models/FLUX.1-dev-AutoRound-w4a16 --omni --port 8100 --disable-log-stats --stage-init-timeout 1200 --init-timeout 1200 --enforce-eager --tensor-parallel-size 2 --cfg-parallel-size 2
+[2026-05-30 09:23:13]   Server healthy after 50s
+[2026-05-30 09:23:13] 
+[2026-05-30 09:23:13] --- Testing: w4a16_tp2_cfg2_512x512_s20 ---
+[2026-05-30 09:23:13]   Warmup...
+[2026-05-30 09:23:20]   Warmup: success=True, latency=7.66s
+[2026-05-30 09:23:28]   Run 1/3: OK, latency=7.53s
+[2026-05-30 09:23:35]   Run 2/3: OK, latency=7.52s
+[2026-05-30 09:23:43]   Run 3/3: OK, latency=7.52s
+[2026-05-30 09:23:43]   >> median=7.52s, mean=7.52s
+[2026-05-30 09:23:43] 
+[2026-05-30 09:23:43] 
+[2026-05-30 09:23:43] --- Testing: w4a16_tp2_cfg2_1024x1024_s20 ---
+[2026-05-30 09:23:43]   Warmup...
+[2026-05-30 09:24:07]   Warmup: success=True, latency=23.78s
+[2026-05-30 09:24:31]   Run 1/3: OK, latency=23.76s
+[2026-05-30 09:24:54]   Run 2/3: OK, latency=23.74s
+[2026-05-30 09:25:18]   Run 3/3: OK, latency=23.75s
+[2026-05-30 09:25:18]   >> median=23.75s, mean=23.75s
+[2026-05-30 09:25:18] 
+[2026-05-30 09:25:18] 
+[2026-05-30 09:25:18] --- Testing: w4a16_tp2_cfg2_1536x1536_s20 ---
+[2026-05-30 09:25:18]   Warmup...
+[2026-05-30 09:26:14]   Warmup: success=True, latency=55.69s
+[2026-05-30 09:27:09]   Run 1/3: OK, latency=55.66s
+[2026-05-30 09:28:05]   Run 2/3: OK, latency=55.68s
+[2026-05-30 09:29:01]   Run 3/3: OK, latency=55.64s
+[2026-05-30 09:29:01]   >> median=55.66s, mean=55.66s
+[2026-05-30 09:29:01] 
+[2026-05-30 09:29:16] ============================================================
+[2026-05-30 09:29:16] Server group: model=FLUX.1-dev, TP=4, CFG=1
+[2026-05-30 09:29:16]   Configs in group: ['bf16_tp4_cfg1_512x512_s20', 'bf16_tp4_cfg1_1024x1024_s20', 'bf16_tp4_cfg1_1536x1536_s20']
+[2026-05-30 09:29:16] ============================================================
+[2026-05-30 09:29:16]   CMD: /home/yiliu7/workspace/venvs/omni/bin/python -m vllm_omni.entrypoints.cli.main serve /home/yiliu7/models/FLUX.1-dev --omni --port 8100 --disable-log-stats --stage-init-timeout 1200 --init-timeout 1200 --enforce-eager --tensor-parallel-size 4
+[2026-05-30 09:30:01]   Server healthy after 45s
+[2026-05-30 09:30:01] 
+[2026-05-30 09:30:01] --- Testing: bf16_tp4_cfg1_512x512_s20 ---
+[2026-05-30 09:30:01]   Warmup...
+[2026-05-30 09:30:14]   Warmup: success=True, latency=12.62s
+[2026-05-30 09:30:26]   Run 1/3: OK, latency=12.58s
+[2026-05-30 09:30:39]   Run 2/3: OK, latency=12.56s
+[2026-05-30 09:30:51]   Run 3/3: OK, latency=12.55s
+[2026-05-30 09:30:51]   >> median=12.56s, mean=12.56s
+[2026-05-30 09:30:51] 
+[2026-05-30 09:30:51] 
+[2026-05-30 09:30:51] --- Testing: bf16_tp4_cfg1_1024x1024_s20 ---
+[2026-05-30 09:30:51]   Warmup...
+[2026-05-30 09:31:28]   Warmup: success=True, latency=36.88s
+[2026-05-30 09:32:05]   Run 1/3: OK, latency=36.82s
+[2026-05-30 09:32:42]   Run 2/3: OK, latency=36.79s
+[2026-05-30 09:33:19]   Run 3/3: OK, latency=36.81s
+[2026-05-30 09:33:19]   >> median=36.81s, mean=36.81s
+[2026-05-30 09:33:19] 
+[2026-05-30 09:33:19] 
+[2026-05-30 09:33:19] --- Testing: bf16_tp4_cfg1_1536x1536_s20 ---
+[2026-05-30 09:33:19]   Warmup...
+[2026-05-30 09:35:14]   Warmup: success=False, latency=114.78s
+[2026-05-30 09:35:14]   FAILED: {"error": {"message": "Image generation failed: {'request_id': 'img_gen-aac7596ef051601d', 'error': 'level_zero backend failed with error: 39 (UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY)'}", "type": "Internal Server Error", "param": null, "code": 500}}
+[2026-05-30 09:35:29] ============================================================
+[2026-05-30 09:35:29] Stage 4 Complete!
+[2026-05-30 09:35:29] Results saved to: /home/yiliu7/workspace/vllm-omni/benchmarks/diffusion/results/b60_flux1_dev_stage4_cfg
+[2026-05-30 09:35:29] ============================================================
+[2026-05-30 09:35:29] 
+[2026-05-30 09:35:29] SUMMARY:
+[2026-05-30 09:35:29] Config                                   Status       Median(s)  Mean(s)   
+[2026-05-30 09:35:29] ------------------------------------------------------------------------
+[2026-05-30 09:35:29] w4a16_tp2_cfg2_512x512_s20               success      7.52       7.52      
+[2026-05-30 09:35:29] bf16_tp4_cfg1_512x512_s20                success      12.56      12.56     
+[2026-05-30 09:35:29] w4a16_tp2_cfg2_1024x1024_s20             success      23.75      23.75     
+[2026-05-30 09:35:29] bf16_tp4_cfg1_1024x1024_s20              success      36.81      36.81     
+[2026-05-30 09:35:29] w4a16_tp2_cfg2_1536x1536_s20             success      55.66      55.66     
+[2026-05-30 09:35:29] bf16_tp4_cfg1_1536x1536_s20              generation_failed N/A        N/A       

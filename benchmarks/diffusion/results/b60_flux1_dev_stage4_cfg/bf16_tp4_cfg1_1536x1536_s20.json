@@ -1,0 +1,16 @@
+{
+  "config": {
+    "name": "bf16_tp4_cfg1_1536x1536_s20",
+    "model": "/home/yiliu7/models/FLUX.1-dev",
+    "tp": 4,
+    "cfg": 1,
+    "res": "1536x1536",
+    "steps": 20
+  },
+  "cmd": "/home/yiliu7/workspace/venvs/omni/bin/python -m vllm_omni.entrypoints.cli.main serve /home/yiliu7/models/FLUX.1-dev --omni --port 8100 --disable-log-stats --stage-init-timeout 1200 --init-timeout 1200 --enforce-eager --tensor-parallel-size 4",
+  "status": "generation_failed",
+  "error": "{\"error\": {\"message\": \"Image generation failed: {'request_id': 'img_gen-aac7596ef051601d', 'error': 'level_zero backend failed with error: 39 (UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY)'}\", \"type\": \"Internal Server Error\", \"param\": null, \"code\": 500}}",
+  "prompt": "A majestic snow-capped mountain reflected in a crystal clear lake at golden hour, photorealistic",
+  "negative_prompt": "low quality, blurry, distorted, watermark, text, ugly",
+  "true_cfg_scale": 4.0
+}

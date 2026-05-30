@@ -1,0 +1,43 @@
+{
+  "config": {
+    "name": "bf16_tp4_cfg1_512x512_s20",
+    "model": "/home/yiliu7/models/FLUX.1-dev",
+    "tp": 4,
+    "cfg": 1,
+    "res": "512x512",
+    "steps": 20
+  },
+  "cmd": "/home/yiliu7/workspace/venvs/omni/bin/python -m vllm_omni.entrypoints.cli.main serve /home/yiliu7/models/FLUX.1-dev --omni --port 8100 --disable-log-stats --stage-init-timeout 1200 --init-timeout 1200 --enforce-eager --tensor-parallel-size 4",
+  "status": "success",
+  "prompt": "A majestic snow-capped mountain reflected in a crystal clear lake at golden hour, photorealistic",
+  "negative_prompt": "low quality, blurry, distorted, watermark, text, ugly",
+  "true_cfg_scale": 4.0,
+  "seed_base": 42,
+  "num_runs": 3,
+  "runs": [
+    {
+      "success": true,
+      "latency": 12.57774829864502,
+      "image_size": 1049696
+    },
+    {
+      "success": true,
+      "latency": 12.556334257125854,
+      "image_size": 1049696
+    },
+    {
+      "success": true,
+      "latency": 12.552693367004395,
+      "image_size": 1049696
+    }
+  ],
+  "latencies": [
+    12.57774829864502,
+    12.556334257125854,
+    12.552693367004395
+  ],
+  "median_latency": 12.556334257125854,
+  "mean_latency": 12.562258640925089,
+  "min_latency": 12.552693367004395,
+  "max_latency": 12.57774829864502
+}
