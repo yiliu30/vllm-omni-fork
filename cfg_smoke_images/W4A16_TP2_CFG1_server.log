@@ -1,0 +1,22 @@
+/home/yiliu7/workspace/vllm-omni/vllm_omni/version.py:55: RuntimeWarning: vLLM and vLLM-Omni appear to have mismatched major/minor versions:
+ --> vLLM-Omni version 0.20.0rc2.dev52+ga106c4723
+ --> vLLM version 0.21.0
+This will likely cause compatibility issues.
+  warn_if_misaligned_vllm_version()
+INFO 05-30 06:40:08 [serve.py:111] Detected diffusion model: /home/yiliu7/models/FLUX.1-dev-AutoRound-w4a16
+INFO 05-30 06:40:08 [logo.py:52]        [97m█     █     █▄   ▄█[0m    [34m   ▄▀▀[38;5;208m▀▀▄ [0m[97m█▄   ▄█ █▄    █ ▀█▀ [0m
+INFO 05-30 06:40:08 [logo.py:52]  [38;5;208m▄▄[0m [34m▄█[0m [97m█     █     █ ▀▄▀ █[0m[97m  ▄▄▄ [0m[34m █    [38;5;208m█ [0m[97m█ ▀▄▀ █ █ ▀▄  █  █  [0m
+INFO 05-30 06:40:08 [logo.py:52]   [38;5;208m█[0m[34m▄█▀[0m [97m█     █     █     █[0m[97m      [0m[34m █    [38;5;208m█ [0m[97m█     █ █   ▀▄█  █  [0m
+INFO 05-30 06:40:08 [logo.py:52]    [34m▀▀[0m  [97m▀▀▀▀▀ ▀▀▀▀▀ ▀     ▀[0m      [35m  ▀▀▀▀  [0m[97m▀     ▀ ▀     ▀ ▀▀▀ [0m
+INFO 05-30 06:40:08 [logo.py:52] 
+[0;36m(APIServer pid=3929194)[0;0m INFO 05-30 06:40:08 [utils.py:306] vLLM server version 0.21.0, serving model /home/yiliu7/models/FLUX.1-dev-AutoRound-w4a16
+[0;36m(APIServer pid=3929194)[0;0m INFO 05-30 06:40:08 [utils.py:240] non-default args: {'model_tag': '/home/yiliu7/models/FLUX.1-dev-AutoRound-w4a16', 'port': 8100, 'model': '/home/yiliu7/models/FLUX.1-dev-AutoRound-w4a16', 'tokenizer_mode': None, 'trust_remote_code': None, 'dtype': None, 'enforce_eager': None, 'config_format': None, 'load_format': None, 'pipeline_parallel_size': None, 'tensor_parallel_size': 2, 'data_parallel_size': None, 'gpu_memory_utilization': None, 'mm_processor_cache_gb': None, 'skip_mm_profiling': None, 'compilation_config': None, 'profiler_config': None, 'disable_log_stats': True}
+[0;36m(APIServer pid=3929194)[0;0m INFO 05-30 06:40:08 [omni_base.py:167] [AsyncOmni] Initializing with model /home/yiliu7/models/FLUX.1-dev-AutoRound-w4a16
+[0;36m(APIServer pid=3929194)[0;0m INFO 05-30 06:40:08 [async_omni_engine.py:248] [AsyncOmniEngine] Initializing with model /home/yiliu7/models/FLUX.1-dev-AutoRound-w4a16
+[0;36m(APIServer pid=3929194)[0;0m WARNING 05-30 06:40:08 [utils.py:191] Filtered out 1 callable object(s) from base_engine_args that are not compatible with OmegaConf: ['dispatch_function']. 
+[0;36m(APIServer pid=3929194)[0;0m [transformers] `Siglip2ImageProcessorFast` is deprecated. The `Fast` suffix for image processors has been removed; use `Siglip2ImageProcessor` instead.
+[0;36m(APIServer pid=3929194)[0;0m WARNING 05-30 06:40:08 [ring_globals.py:60] FlashInfer is unavailable; falling back to other attention backends. Reason: No module named 'flashinfer'
+[0;36m(APIServer pid=3929194)[0;0m INFO 05-30 06:40:08 [async_omni_engine.py:310] [AsyncOmniEngine] Launching Orchestrator thread with 1 stages
+[0;36m(APIServer pid=3929194)[0;0m INFO 05-30 06:40:08 [stage_init_utils.py:535] [stage_init] Stage-0 set runtime devices: 0,1
+[0;36m(APIServer pid=3929194)[0;0m INFO 05-30 06:40:08 [factory.py:254] Building quantization config: auto-round
+[0;36m(APIServer pid=3929194)[0;0m INFO 05-30 06:40:08 [data.py:753] Auto-detected quantization 'auto-round' from model config

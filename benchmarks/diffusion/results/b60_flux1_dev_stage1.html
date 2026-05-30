@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FLUX.1-dev Benchmark — Intel Arc Pro B60 ×4 (Stage 1)</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root { --bg: #0f172a; --card: #1e293b; --border: #334155; --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8; --green: #4ade80; --red: #f87171; --yellow: #fbbf24; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; padding: 2rem; }
+  h1 { font-size: 1.8rem; margin-bottom: .25rem; }
+  .subtitle { color: var(--muted); margin-bottom: 2rem; font-size: .95rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; }
+  .card h2 { font-size: 1.1rem; margin-bottom: 1rem; color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  th, td { padding: .5rem .75rem; text-align: right; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: .75rem; letter-spacing: .05em; }
+  td:first-child, th:first-child { text-align: left; }
+  .pass { color: var(--green); }
+  .fail { color: var(--red); }
+  .warn { color: var(--yellow); }
+  .chart-container { position: relative; height: 300px; }
+  .env-grid { display: grid; grid-template-columns: 140px 1fr; gap: .25rem .75rem; font-size: .85rem; }
+  .env-grid dt { color: var(--muted); }
+  .env-grid dd { color: var(--text); }
+  .kpi { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 2rem; }
+  .kpi-item { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1.5rem; min-width: 160px; }
+  .kpi-item .value { font-size: 1.6rem; font-weight: 700; color: var(--accent); }
+  .kpi-item .label { font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .note { background: #1e293b; border-left: 3px solid var(--yellow); padding: .75rem 1rem; margin: 1rem 0; font-size: .85rem; color: var(--muted); border-radius: 0 8px 8px 0; }
+  footer { margin-top: 3rem; color: var(--muted); font-size: .8rem; text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>FLUX.1-dev Serving Benchmark — Intel Arc Pro B60</h1>
+<p class="subtitle">Stage 1: Quick Baseline · 1024×1024 · 20 steps · vbench dataset · 10 prompts · vLLM-Omni v0.20.0rc2</p>
+
+<!-- KPIs -->
+<div class="kpi">
+  <div class="kpi-item"><div class="value">18.26s</div><div class="label">Best bf16 (TP=4)</div></div>
+  <div class="kpi-item"><div class="value">19.01s</div><div class="label">Best W4A16 (TP=4)</div></div>
+  <div class="kpi-item"><div class="value">30.03s</div><div class="label">W4A16 Single-GPU</div></div>
+  <div class="kpi-item"><div class="value">3.65×</div><div class="label">vs 5090 (TP=1)</div></div>
+  <div class="kpi-item"><div class="value">11.1 GB</div><div class="label">W4A16 TP=4 Memory</div></div>
+</div>
+
+<!-- Environment -->
+<div class="grid">
+<div class="card">
+  <h2>Test Environment</h2>
+  <dl class="env-grid">
+    <dt>GPU</dt><dd>Intel Arc Pro B60 (24.4 GB) × 4</dd>
+    <dt>CPU</dt><dd>Intel Xeon 6767P</dd>
+    <dt>RAM</dt><dd>503 GB</dd>
+    <dt>Framework</dt><dd>vLLM-Omni v0.20.0rc2.dev52</dd>
+    <dt>Python</dt><dd>/home/yiliu7/workspace/venvs/omni/bin/python</dd>
+    <dt>Attention</dt><dd>SDPA (XPU default)</dd>
+    <dt>Date</dt><dd>2026-05-29</dd>
+  </dl>
+</div>
+<div class="card">
+  <h2>Models</h2>
+  <dl class="env-grid">
+    <dt>bf16</dt><dd>/home/yiliu7/models/FLUX.1-dev<br><span style="color:var(--muted)">~23 GB transformer + 8.9 GB T5-XXL</span></dd>
+    <dt>W4A16</dt><dd>/home/yiliu7/models/FLUX.1-dev-AutoRound-w4a16<br><span style="color:var(--muted)">AutoRound quantized, fits single GPU</span></dd>
+  </dl>
+  <div class="note">bf16 TP=1: OOM (>24.4 GB). bf16 TP=2: OOM at inference time (model loads but 1024×1024 generation exceeds memory).</div>
+</div>
+</div>
+
+<!-- Main Results Table -->
+<div class="card" style="margin-bottom:2rem">
+  <h2>Latency & Memory — Concurrency=1 Across TP Sizes</h2>
+  <table>
+    <thead>
+      <tr><th>Config</th><th>TP</th><th>Conc.</th><th>Mean (s)</th><th>Median (s)</th><th>P95 (s)</th><th>P99 (s)</th><th>Throughput (qps)</th><th>Peak Mem (MB)</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>bf16</td><td>1</td><td>1</td><td colspan="6" style="text-align:center;color:var(--red)">OOM — model exceeds 24.4 GB</td><td class="fail">OOM</td></tr>
+      <tr><td>bf16</td><td>2</td><td>1</td><td>—</td><td>—</td><td>—</td><td>—</td><td>0.0000</td><td>—</td><td class="fail">0/10 ✗</td></tr>
+      <tr><td>bf16</td><td>4</td><td>1</td><td>18.26</td><td>18.26</td><td>18.34</td><td>18.36</td><td>0.0548</td><td>22,022</td><td class="pass">10/10 ✓</td></tr>
+      <tr><td>W4A16</td><td>1</td><td>1</td><td>30.03</td><td>30.04</td><td>30.07</td><td>30.08</td><td>0.0333</td><td>19,798</td><td class="pass">10/10 ✓</td></tr>
+      <tr><td>W4A16</td><td>2</td><td>1</td><td>22.85</td><td>22.87</td><td>22.92</td><td>22.93</td><td>0.0438</td><td>13,530</td><td class="pass">10/10 ✓</td></tr>
+      <tr><td>W4A16</td><td>4</td><td>1</td><td>19.01</td><td>19.01</td><td>19.07</td><td>19.07</td><td>0.0526</td><td>11,130</td><td class="pass">10/10 ✓</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Concurrency Sweep -->
+<div class="card" style="margin-bottom:2rem">
+  <h2>W4A16 TP=1 — Concurrency Sweep</h2>
+  <table>
+    <thead>
+      <tr><th>Concurrency</th><th>Mean (s)</th><th>Median (s)</th><th>P95 (s)</th><th>P99 (s)</th><th>Throughput (qps)</th><th>Peak Mem (MB)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1</td><td>30.03</td><td>30.04</td><td>30.07</td><td>30.08</td><td>0.0333</td><td>19,798</td></tr>
+      <tr><td>2</td><td>56.27</td><td>59.13</td><td>59.48</td><td>59.59</td><td>0.0338</td><td>19,798</td></tr>
+      <tr><td>4</td><td>100.71</td><td>118.24</td><td>118.54</td><td>118.67</td><td>0.0338</td><td>19,798</td></tr>
+      <tr><td>8</td><td>154.12</td><td>163.08</td><td>236.80</td><td>236.93</td><td>0.0338</td><td>19,798</td></tr>
+    </tbody>
+  </table>
+  <div class="note">Throughput is flat (~0.034 qps) regardless of concurrency — no continuous batching. Latency scales linearly, confirming sequential execution.</div>
+</div>
+
+<!-- B60 vs 5090 Comparison -->
+<div class="card" style="margin-bottom:2rem">
+  <h2>B60 vs RTX 5090 D — Head-to-Head (1024×1024, 20 steps, C=1)</h2>
+  <table>
+    <thead>
+      <tr><th>Config</th><th>B60 Mean (s)</th><th>5090 Mean (s)</th><th>5090 / B60</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>W4A16 TP=1</td><td>30.03</td><td>8.23</td><td>3.65×</td></tr>
+      <tr><td>W4A16 TP=2</td><td>22.85</td><td>8.06</td><td>2.83×</td></tr>
+      <tr><td>W4A16 TP=4</td><td>19.01</td><td>7.84</td><td>2.42×</td></tr>
+      <tr><td>bf16 TP=4</td><td>18.26</td><td>8.08</td><td>2.26×</td></tr>
+      <tr><td>bf16 TP=2</td><td class="fail">FAIL</td><td>8.37</td><td>—</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Charts -->
+<div class="grid">
+<div class="card">
+  <h2>Latency by TP Size (C=1)</h2>
+  <div class="chart-container"><canvas id="chartTP"></canvas></div>
+</div>
+<div class="card">
+  <h2>GPU Memory by TP Size</h2>
+  <div class="chart-container"><canvas id="chartMem"></canvas></div>
+</div>
+<div class="card">
+  <h2>W4A16 TP=1 — Latency vs Concurrency</h2>
+  <div class="chart-container"><canvas id="chartConc"></canvas></div>
+</div>
+<div class="card">
+  <h2>B60 vs 5090 Latency</h2>
+  <div class="chart-container"><canvas id="chartVs"></canvas></div>
+</div>
+</div>
+
+<!-- Key Findings -->
+<div class="card" style="margin-bottom:2rem">
+  <h2>Key Findings</h2>
+  <ol style="padding-left:1.5rem; font-size:.9rem; line-height:2">
+    <li><strong>bf16 requires TP=4</strong> on B60 — TP=1 OOMs at load, TP=2 OOMs during inference (1024×1024).</li>
+    <li><strong>W4A16 fits single GPU</strong> at 19.8 GB peak (of 24.4 GB available).</li>
+    <li><strong>bf16 TP=4 beats W4A16 TP=4</strong> — 18.26s vs 19.01s (4% faster). Unlike 5090 where W4A16 was faster, BF16 wins on B60 likely due to XPU's bf16 hardware support advantage over INT4 dequant overhead.</li>
+    <li><strong>TP scaling on B60</strong>: TP=1→2 gives 1.31× speedup, TP=2→4 gives 1.20×. Diminishing returns but still useful.</li>
+    <li><strong>B60 is 2.3–3.7× slower than 5090</strong> depending on config. Gap narrows with more TP (less compute-bound).</li>
+    <li><strong>No continuous batching</strong> — throughput is constant at ~0.034 qps regardless of concurrency.</li>
+    <li><strong>XPU driver caution</strong> — <code>--stage-init-timeout 900</code> required; default 300s times out during bf16 loading.</li>
+  </ol>
+</div>
+
+<!-- Reproduction -->
+<div class="card" style="margin-bottom:2rem">
+  <h2>Reproduction Commands</h2>
+  <pre style="background:#0f172a; padding:1rem; border-radius:8px; overflow-x:auto; font-size:.8rem; color:#94a3b8"><code># Stage 1 (all configs)
+cd /home/yiliu7/workspace/vllm-omni
+bash run_b60_stage1.sh
+
+# Single config example: W4A16 TP=4, C=1
+PYTHON=/home/yiliu7/workspace/venvs/omni/bin/python
+
+# 1. Start server
+$PYTHON -m vllm_omni.entrypoints.cli.main serve \
+    /home/yiliu7/models/FLUX.1-dev-AutoRound-w4a16 \
+    --omni --tensor-parallel-size 4 --port 8099 \
+    --disable-log-stats --stage-init-timeout 900
+
+# 2. Wait for health
+until curl -s http://localhost:8099/health; do sleep 5; done
+
+# 3. Run benchmark
+$PYTHON benchmarks/diffusion/diffusion_benchmark_serving.py \
+    --backend vllm-omni --base-url http://localhost:8099 \
+    --model /home/yiliu7/models/FLUX.1-dev-AutoRound-w4a16 \
+    --task t2i --dataset vbench --num-prompts 10 \
+    --width 1024 --height 1024 --num-inference-steps 20 \
+    --max-concurrency 1 --warmup-requests 1 --warmup-concurrency 1 \
+    --output-file results/w4a16_tp4_c1.json</code></pre>
+</div>
+
+<footer>Generated 2026-05-29 · FLUX.1-dev Benchmark Stage 1 · Intel Arc Pro B60 × 4</footer>
+
+<script>
+const chartDefaults = { responsive: true, maintainAspectRatio: false };
+const colors = { bf16: '#38bdf8', w4a16: '#4ade80', '5090_bf16': '#38bdf880', '5090_w4a16': '#4ade8080' };
+
+// TP Scaling Chart
+new Chart(document.getElementById('chartTP'), {
+  type: 'bar',
+  data: {
+    labels: ['TP=1', 'TP=2', 'TP=4'],
+    datasets: [
+      { label: 'bf16', data: [null, null, 18.26], backgroundColor: colors.bf16 },
+      { label: 'W4A16', data: [30.03, 22.85, 19.01], backgroundColor: colors.w4a16 }
+    ]
+  },
+  options: { ...chartDefaults, plugins: { title: { display: false } }, scales: { y: { title: { display: true, text: 'Mean Latency (s)', color: '#94a3b8' }, grid: { color: '#334155' }, ticks: { color: '#94a3b8' } }, x: { ticks: { color: '#94a3b8' }, grid: { display: false } } } }
+});
+
+// Memory Chart
+new Chart(document.getElementById('chartMem'), {
+  type: 'bar',
+  data: {
+    labels: ['TP=1', 'TP=2', 'TP=4'],
+    datasets: [
+      { label: 'bf16', data: [null, null, 22022], backgroundColor: colors.bf16 },
+      { label: 'W4A16', data: [19798, 13530, 11130], backgroundColor: colors.w4a16 }
+    ]
+  },
+  options: { ...chartDefaults, scales: { y: { title: { display: true, text: 'Peak Memory (MB)', color: '#94a3b8' }, grid: { color: '#334155' }, ticks: { color: '#94a3b8' } }, x: { ticks: { color: '#94a3b8' }, grid: { display: false } } } }
+});
+
+// Concurrency Chart
+new Chart(document.getElementById('chartConc'), {
+  type: 'line',
+  data: {
+    labels: ['1', '2', '4', '8'],
+    datasets: [
+      { label: 'Mean', data: [30.03, 56.27, 100.71, 154.12], borderColor: colors.w4a16, backgroundColor: colors.w4a16 + '40', fill: true, tension: 0.3 },
+      { label: 'P99', data: [30.08, 59.59, 118.67, 236.93], borderColor: '#f87171', borderDash: [5, 5], fill: false, tension: 0.3 }
+    ]
+  },
+  options: { ...chartDefaults, scales: { y: { title: { display: true, text: 'Latency (s)', color: '#94a3b8' }, grid: { color: '#334155' }, ticks: { color: '#94a3b8' } }, x: { title: { display: true, text: 'Concurrency', color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { display: false } } } }
+});
+
+// B60 vs 5090 Chart
+new Chart(document.getElementById('chartVs'), {
+  type: 'bar',
+  data: {
+    labels: ['W4A16\nTP=1', 'W4A16\nTP=2', 'W4A16\nTP=4', 'bf16\nTP=4'],
+    datasets: [
+      { label: 'B60', data: [30.03, 22.85, 19.01, 18.26], backgroundColor: '#38bdf8' },
+      { label: '5090', data: [8.23, 8.06, 7.84, 8.08], backgroundColor: '#fbbf24' }
+    ]
+  },
+  options: { ...chartDefaults, scales: { y: { title: { display: true, text: 'Mean Latency (s)', color: '#94a3b8' }, grid: { color: '#334155' }, ticks: { color: '#94a3b8' } }, x: { ticks: { color: '#94a3b8' }, grid: { display: false } } } }
+});
+</script>
+</body>
+</html>

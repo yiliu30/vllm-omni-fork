@@ -1,0 +1,30 @@
+{
+  "duration": 300.3518712501973,
+  "completed_requests": 10,
+  "failed_requests": 0,
+  "throughput_qps": 0.03329428233083942,
+  "latency_mean": 30.034799097292126,
+  "latency_median": 30.043639649637043,
+  "latency_p99": 30.07546130300965,
+  "latency_p95": 30.071218417654745,
+  "latency_p50": 30.043639649637043,
+  "peak_memory_mb_max": 19798.0,
+  "peak_memory_mb_mean": 19798.0,
+  "peak_memory_mb_median": 19798.0,
+  "stage_durations_mean": {
+    "queue_wait_ms": 0.34616412594914436,
+    "stage_0_gen_ms": 29611.64107322693
+  },
+  "stage_durations_p50": {
+    "queue_wait_ms": 0.3388605546206236,
+    "stage_0_gen_ms": 29613.22820186615
+  },
+  "stage_durations_p99": {
+    "queue_wait_ms": 0.4387813387438655,
+    "stage_0_gen_ms": 29620.905182361603
+  },
+  "backend": "vllm-omni",
+  "model": "/home/yiliu7/models/FLUX.1-dev-AutoRound-w4a16",
+  "dataset": "vbench",
+  "task": "t2i"
+}

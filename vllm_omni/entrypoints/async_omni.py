@@ -945,6 +945,16 @@ class AsyncOmni(EngineClient, OmniBase):
         """Check engine health by verifying the Orchestrator process is alive."""
         OmniBase.check_health(self)
 
+    async def notify_kv_transfer_request_rejected(
+        self,
+        request_id: str,
+        kv_transfer_params: dict[str, Any],
+        *,
+        data_parallel_rank: int | None = None,
+    ) -> None:
+        """No-op: KV transfer is not used in omni pipelines."""
+        pass
+
     # ==================== Shutdown ====================
 
     def shutdown(self, timeout: float | None = None) -> None:

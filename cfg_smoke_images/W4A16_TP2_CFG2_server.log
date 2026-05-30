@@ -1,0 +1,5 @@
+/home/yiliu7/workspace/vllm-omni/vllm_omni/version.py:55: RuntimeWarning: vLLM and vLLM-Omni appear to have mismatched major/minor versions:
+ --> vLLM-Omni version 0.20.0rc2.dev52+ga106c4723
+ --> vLLM version 0.21.0
+This will likely cause compatibility issues.
+  warn_if_misaligned_vllm_version()
