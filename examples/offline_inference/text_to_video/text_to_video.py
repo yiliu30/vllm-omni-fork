@@ -82,6 +82,31 @@ def parse_extra_body(value: str) -> dict[str, Any]:
     return body
 
 
+def parse_diffusion_attention_config(value: str) -> dict[str, Any]:
+    """Parse a JSON object selecting the attention backend per role.
+
+    Forwarded verbatim to ``Omni(diffusion_attention_config=...)`` and coerced
+    into an ``AttentionConfig`` (see vllm_omni/diffusion/data.py). A spec may be
+    a bare backend name or a ``{"backend": ..., "extra": {...}}`` object. Shapes:
+
+      * Global default (all roles):
+          '{"default": {"backend": "TORCH_SDPA"}}'   (or '{"default": "TORCH_SDPA"}')
+      * Per role (e.g. sparse self-attention, dense cross-attention):
+          '{"per_role": {"self": "SAGE_ATTN", "cross": "TORCH_SDPA"}}'
+    """
+    try:
+        config = json.loads(value)
+    except json.JSONDecodeError as e:
+        raise argparse.ArgumentTypeError(f"--diffusion-attention-config must be valid JSON: {e}") from e
+    if not isinstance(config, dict):
+        raise argparse.ArgumentTypeError("--diffusion-attention-config must be a JSON object")
+    if not config.keys() <= {"default", "per_role"}:
+        raise argparse.ArgumentTypeError(
+            "--diffusion-attention-config keys must be a subset of {'default', 'per_role'}"
+        )
+    return config
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate a video from a text prompt. "
@@ -110,6 +135,15 @@ def parse_args() -> argparse.Namespace:
         '\'{"is_enable_stage2": true, "pyramid_num_inference_steps_list": [2, 2, 2], "is_amplify_first_chunk": true}\'.',
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
+    parser.add_argument(
+        "--diffusion-attention-config",
+        type=parse_diffusion_attention_config,
+        default=None,
+        help="JSON attention-backend config passed to Omni(diffusion_attention_config=...). "
+        "Global: '{\"default\": {\"backend\": \"TORCH_SDPA\"}}'. "
+        "Per role: '{\"per_role\": {\"self\": \"SAGE_ATTN\", \"cross\": \"TORCH_SDPA\"}}'. "
+        "If omitted, falls back to the DIFFUSION_ATTENTION_BACKEND env var / platform default.",
+    )
     parser.add_argument("--guidance-scale", type=float, default=None, help="CFG scale. Default: model-specific.")
     parser.add_argument(
         "--guidance-scale-high", type=float, default=None, help="Separate CFG for high-noise stage (Wan2.2 only)."
@@ -350,6 +384,8 @@ def main():
         omni_kwargs["boundary_ratio"] = args.boundary_ratio
     if args.flow_shift is not None:
         omni_kwargs["flow_shift"] = args.flow_shift
+    if args.diffusion_attention_config is not None:
+        omni_kwargs["diffusion_attention_config"] = args.diffusion_attention_config
     if args.quantization is not None:
         omni_kwargs["quantization"] = args.quantization
     if args.cache_backend is not None:

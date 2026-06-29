@@ -6,8 +6,12 @@
 # Adapted from
 # https://github.com/feifeibear/long-context-attention/blob/main/yunchang/attention/layer.py
 
-
+import atexit
+import json
+import os
+import time
 from dataclasses import replace
+from threading import Lock
 
 import torch
 import torch.nn as nn
@@ -26,6 +30,67 @@ from vllm_omni.diffusion.forward_context import get_forward_context, is_forward_
 from vllm_omni.platforms import current_omni_platform
 
 logger = init_logger(__name__)
+
+_ATTN_TIMING_ENABLED = os.environ.get("DIFFUSION_ATTN_TIMING", "").strip().lower() in {"1", "true", "yes", "on"}
+_ATTN_TIMING_LOCK = Lock()
+_ATTN_TIMING_STATS: dict[tuple[str, str], dict[str, float | int]] = {}
+_ATTN_TIMING_DUMPED = False
+
+
+def _attention_timing_synchronize() -> None:
+    if current_omni_platform.is_xpu() and hasattr(torch, "xpu"):
+        torch.xpu.synchronize()
+    elif current_omni_platform.is_cuda():
+        torch.cuda.synchronize()
+
+
+def _record_attention_timing(role: str, backend: str, elapsed_ms: float) -> None:
+    key = (role, backend)
+    with _ATTN_TIMING_LOCK:
+        entry = _ATTN_TIMING_STATS.setdefault(
+            key,
+            {
+                "calls": 0,
+                "total_ms": 0.0,
+                "min_ms": float("inf"),
+                "max_ms": 0.0,
+            },
+        )
+        entry["calls"] += 1
+        entry["total_ms"] += elapsed_ms
+        entry["min_ms"] = min(float(entry["min_ms"]), elapsed_ms)
+        entry["max_ms"] = max(float(entry["max_ms"]), elapsed_ms)
+
+
+def _dump_attention_timing_summary() -> None:
+    global _ATTN_TIMING_DUMPED
+    if not _ATTN_TIMING_ENABLED or _ATTN_TIMING_DUMPED:
+        return
+    with _ATTN_TIMING_LOCK:
+        _ATTN_TIMING_DUMPED = True
+        summary = []
+        for (role, backend), stats in sorted(_ATTN_TIMING_STATS.items()):
+            calls = int(stats["calls"])
+            total_ms = float(stats["total_ms"])
+            summary.append(
+                {
+                    "role": role,
+                    "backend": backend,
+                    "calls": calls,
+                    "total_ms": round(total_ms, 6),
+                    "avg_ms": round(total_ms / calls, 6) if calls else 0.0,
+                    "min_ms": round(float(stats["min_ms"]), 6) if calls else 0.0,
+                    "max_ms": round(float(stats["max_ms"]), 6) if calls else 0.0,
+                }
+            )
+    payload = {
+        "pid": os.getpid(),
+        "summary": summary,
+    }
+    print(f"[ATTN_TIMING_SUMMARY]{json.dumps(payload, sort_keys=True)}", flush=True)
+
+
+atexit.register(_dump_attention_timing_summary)
 
 
 def _try_extract_layer_index(prefix: str) -> int | None:
@@ -262,7 +327,17 @@ class Attention(nn.Module):
             return self.sdpa_fallback.forward(query, key, value, attn_metadata)
 
         # Fallback to standard attention
-        return self.attention.forward(query, key, value, attn_metadata)
+        if not _ATTN_TIMING_ENABLED:
+            return self.attention.forward(query, key, value, attn_metadata)
+
+        backend_name = self.backend_pref or self.attn_backend.get_name()
+        _attention_timing_synchronize()
+        start = time.perf_counter()
+        out = self.attention.forward(query, key, value, attn_metadata)
+        _attention_timing_synchronize()
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        _record_attention_timing(self.role, backend_name, elapsed_ms)
+        return out
 
     def _run_ring_attention(self, query, key, value, attn_metadata):
         # Delegate to RingParallelAttention strategy if available
