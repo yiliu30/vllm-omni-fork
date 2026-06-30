@@ -1156,6 +1156,26 @@ class OmniDiffusionConfig:
                 else:
                     raise
 
+        # After loading the model config, try to detect offline quantization
+        # config (AutoRound W4A16, etc.) stored in transformer/quantization_config.json.
+        # This is a separate file from transformer/config.json, so it needs
+        # explicit handling regardless of which branch (diffusers or default)
+        # was taken above.
+        if self.quantization_config is None:
+            try:
+                qc_dict = get_hf_file_to_dict(
+                    "transformer/quantization_config.json", self.model
+                )
+            except Exception:
+                qc_dict = None
+            if isinstance(qc_dict, dict):
+                self.quantization_config = build_quant_config(qc_dict)
+                if self.quantization_config is not None:
+                    logger.info(
+                        "Auto-detected quantization '%s' from transformer subfolder",
+                        getattr(self.quantization_config, "get_name", lambda: "unknown")(),
+                    )
+
     @classmethod
     def from_kwargs(cls, **kwargs: Any) -> "OmniDiffusionConfig":
         kwargs = normalize_omni_diffusion_kwargs(kwargs)

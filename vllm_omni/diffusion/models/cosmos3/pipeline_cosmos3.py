@@ -758,6 +758,30 @@ class Cosmos3OmniDiffusersPipeline(
             sound_dim = self._sound_tokenizer.latent_ch
             sound_latent_fps = self._sound_tokenizer.latent_fps
 
+        # --- Fix up quantization config block names for omni internal naming ---
+        # omni splits the diffusers flat "layers" into separate module lists:
+        #   language_model.layers (understanding pathway)
+        #   gen_layers           (generation pathway)
+        # Remap block_name_to_quantize so vLLM's INCConfig.get_quant_method
+        # matches layer prefixes in both pathways, creating packed
+        # qweight/qzeros/scales for ColumnParallelLinear / RowParallelLinear.
+        quant_config = getattr(od_config, "quantization_config", None)
+        if quant_config is not None:
+            from vllm.model_executor.layers.quantization.inc import INCConfig
+
+            if isinstance(quant_config, INCConfig):
+                block_name = getattr(quant_config, "block_name_to_quantize", None)
+                if block_name is not None:
+                    if isinstance(block_name, str):
+                        block_name = [b.strip() for b in block_name.split(",") if b.strip()]
+                    remapped: list[str] = []
+                    for bn in block_name:
+                        if bn == "layers" or bn.startswith("layers."):
+                            remapped.extend(["language_model.layers", "gen_layers"])
+                        else:
+                            remapped.append(bn)
+                    quant_config.block_name_to_quantize = remapped
+
         # --- Transformer (weights loaded later via weights_sources) ---
         self.transformer = Cosmos3VFMTransformer(
             od_config=od_config,
