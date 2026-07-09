@@ -54,12 +54,6 @@ AutoRound support is checkpoint-driven. A model is supported when its
 checkpoint uses a compatible INC/AutoRound config and the target stage maps to
 vLLM-Omni's runtime module names.
 
-For Cosmos3 world-model checkpoints, keep the compatibility fix in the
-checkpoint metadata rather than in Omni runtime code:
-
-- embed `quantization_config` into `transformer/config.json`
-- set `block_name_to_quantize` to `language_model.layers,gen_layers`
-
 ### Multi-Stage Diffusion Model (BAGEL, GLM-Image)
 
 | Model | Scope | Status | Notes |
@@ -123,11 +117,6 @@ The checkpoint should contain a config like:
 
 At load time, vLLM-Omni builds an `OmniINCConfig`, remaps checkpoint block names
 to runtime module names, and selects the matching vLLM compute backend.
-
-The validated Cosmos3 world-model checkpoint is
-`Yi30/Cosmos3-Super-W4A16-packed`:
-
-- https://huggingface.co/Yi30/Cosmos3-Super-W4A16-packed
 
 Example checkpoint creation:
 
