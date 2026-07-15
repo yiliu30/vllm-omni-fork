@@ -4,6 +4,7 @@ import asyncio
 import base64
 import dataclasses
 import io
+import inspect
 import json
 import multiprocessing
 import multiprocessing.forkserver as forkserver
@@ -66,7 +67,10 @@ from vllm.entrypoints.serve.disagg.serving import ServingTokens
 # Keep a fallback for older/newer upstream layouts during rebase windows.
 from vllm.entrypoints.serve.instrumentator.basic import base
 from vllm.entrypoints.serve.render.serving import OpenAIServingRender
-from vllm.entrypoints.serve.tokenize.serving import ServingTokenization
+try:
+    from vllm.entrypoints.serve.tokenize.serving import ServingTokenization
+except ImportError:
+    from vllm.entrypoints.serve.tokenize.serving import OpenAIServingTokenization as ServingTokenization
 from vllm.entrypoints.serve.utils.api_utils import (
     load_aware_call,
     process_lora_modules,
@@ -155,6 +159,34 @@ router = APIRouter()
 
 MAX_UINT32_SEED = 2**32 - 1
 profiler_router = APIRouter()
+
+
+def _create_serving_tokenization(
+    engine_client: EngineClient,
+    serving_models: OpenAIServingModels,
+    serving_render: OpenAIServingRender,
+    *,
+    request_logger: RequestLogger | None,
+    chat_template: str | None,
+    chat_template_content_format: Any,
+    default_chat_template_kwargs: dict[str, Any] | None,
+    trust_request_chat_template: bool,
+) -> Any:
+    """Handle vLLM tokenization API drift across nearby upstream versions."""
+
+    init_params = inspect.signature(ServingTokenization.__init__).parameters
+    kwargs = {
+        "request_logger": request_logger,
+        "chat_template": chat_template,
+        "chat_template_content_format": chat_template_content_format,
+        "default_chat_template_kwargs": default_chat_template_kwargs,
+        "trust_request_chat_template": trust_request_chat_template,
+    }
+
+    if "engine_client" in init_params:
+        return ServingTokenization(engine_client, serving_models, serving_render, **kwargs)
+
+    return ServingTokenization(serving_models, serving_render, **kwargs)
 
 
 def _load_model_chat_template_json(model: str) -> str | None:
@@ -1021,7 +1053,8 @@ async def omni_init_app_state(
         if any(t in supported_tasks for t in ("embed", "score", "token_embed"))
         else None
     )
-    state.serving_tokenization = ServingTokenization(
+    state.serving_tokenization = _create_serving_tokenization(
+        engine_client,
         state.openai_serving_models,
         state.openai_serving_render,
         request_logger=request_logger,

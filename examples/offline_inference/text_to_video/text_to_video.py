@@ -224,6 +224,15 @@ def parse_args() -> argparse.Namespace:
         help='JSON profiler config for torch/cuda profiling, e.g. \'{"profiler":"torch","torch_profiler_dir":"./perf"}\'.',
     )
     parser.add_argument(
+        "--diffusion-attention-config",
+        type=parse_profiler_config,
+        default=None,
+        help=(
+            "JSON diffusion attention config, e.g. "
+            '\'{"default":{"backend":"FLASH_ATTN"},"per_role":{"cosmos3.gen":{"backend":"SAGE_ATTN"}}}\'.'
+        ),
+    )
+    parser.add_argument(
         "--quantization",
         type=str,
         default=None,
@@ -374,6 +383,7 @@ def main():
         cache_config=cache_config,
         enable_diffusion_pipeline_profiler=args.enable_diffusion_pipeline_profiler,
         profiler_config=args.profiler_config,
+        diffusion_attention_config=args.diffusion_attention_config,
     )
     if args.boundary_ratio is not None:
         omni_kwargs["boundary_ratio"] = args.boundary_ratio

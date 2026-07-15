@@ -535,6 +535,8 @@ class Cosmos3CausalAttention(nn.Module):
             causal=True,
             softmax_scale=1.0 / (self.head_dim**0.5),
             num_kv_heads=self.num_kv_heads,
+            role="cosmos3.und",
+            role_category="self",
             skip_sequence_parallel=True,
         )
 
@@ -640,6 +642,8 @@ class Cosmos3CrossAttention(nn.Module):
             causal=False,
             softmax_scale=1.0 / (self.head_dim**0.5),
             num_kv_heads=self.num_kv_heads,
+            role="cosmos3.gen",
+            role_category="cross",
         )
 
     # TODO(follow-up): collapse _forward_local and _forward_sp into a single

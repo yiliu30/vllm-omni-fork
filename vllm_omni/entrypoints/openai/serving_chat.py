@@ -69,7 +69,10 @@ from vllm.entrypoints.openai.parser.harmony_utils import (
     get_streamable_parser_for_assistant,
 )
 from vllm.entrypoints.openai.responses.protocol import ResponsesRequest
-from vllm.entrypoints.serve.engine.typing import ChatLikeRequest
+try:
+    from vllm.entrypoints.serve.engine.typing import ChatLikeRequest
+except ImportError:
+    from vllm.entrypoints.openai.engine.serving import ChatLikeRequest
 from vllm.entrypoints.serve.utils.api_utils import should_include_usage
 from vllm.entrypoints.serve.utils.tool_calls_utils import maybe_filter_parallel_tool_calls
 from vllm.inputs import PromptType
