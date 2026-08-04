@@ -3,7 +3,9 @@
 # https://github.com/vllm-project/vllm/blob/main/vllm/distributed/parallel_state.py
 # Copyright 2023 The vLLM team.
 # Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
+import os
 import pickle
+import time
 from collections import namedtuple
 from typing import Any
 
@@ -93,6 +95,7 @@ class GroupCoordinator:
     rank_in_group: int  # rank inside the group
     cpu_group: ProcessGroup  # group for CPU communication
     device_group: ProcessGroup  # group for device communication
+    collective_rendezvous_group: ProcessGroup | None
 
     def __init__(
         self,
@@ -104,6 +107,7 @@ class GroupCoordinator:
         self.local_rank = local_rank
         self.device_group = None
         self.cpu_group = None
+        self.collective_rendezvous_group = None
         self.shm_broadcaster = None
 
         for ranks in group_ranks:
@@ -215,12 +219,70 @@ class GroupCoordinator:
         if dim < 0:
             # Convert negative dim to positive.
             dim += input_.dim()
+
+        use_xpu_cfg_fence = (
+            input_.device.type == "xpu"
+            and separate_tensors
+            and group is self.device_group
+            and self.collective_rendezvous_group is not None
+        )
+        trace_xpu_cfg = os.environ.get("VLLM_OMNI_CFG_GATHER_TRACE") == "1" and use_xpu_cfg_fence
+
+        def trace(stage: str, tensor: torch.Tensor) -> None:
+            if trace_xpu_cfg:
+                print(
+                    "[cfg_xpu_collective] "
+                    f"t={time.monotonic():.6f} rank={self.rank} "
+                    f"cfg_rank={self.rank_in_group} stage={stage} "
+                    f"shape={tuple(tensor.shape)} contiguous={tensor.is_contiguous()}",
+                    flush=True,
+                )
+
+        trace("before_contiguous", input_)
+        input_tensor = input_.contiguous()
+        trace("after_contiguous", input_tensor)
+        if use_xpu_cfg_fence:
+            # XCCL launches collectives asynchronously with respect to the host.
+            # CFG groups are orthogonal to TP groups, so all ranks must finish
+            # the TP device phase before any rank enters the CFG device phase.
+            rendezvous_group = self.collective_rendezvous_group
+            assert rendezvous_group is not None
+            trace("before_stream_sync", input_tensor)
+            torch.xpu.current_stream().synchronize()
+            trace("after_stream_sync", input_tensor)
+            trace("before_host_rendezvous", input_tensor)
+            torch.distributed.barrier(group=rendezvous_group)
+            trace("after_host_rendezvous", input_tensor)
+            output_shape = list(input_tensor.shape)
+            output_shape[0] *= world_size
+            output_tensor = torch.empty(
+                output_shape,
+                dtype=input_tensor.dtype,
+                device=input_tensor.device,
+            )
+            trace("before_all_gather", input_tensor)
+            torch.distributed.all_gather_into_tensor(
+                output_tensor, input_tensor, group=group
+            )
+            trace("after_all_gather", input_tensor)
+            trace("before_collective_stream_sync", input_tensor)
+            torch.xpu.current_stream().synchronize()
+            trace("after_collective_stream_sync", input_tensor)
+            # Keep a faster CFG pair from re-entering TP while another pair is
+            # still completing CFG work on an orthogonal communicator.
+            trace("before_host_release", input_tensor)
+            torch.distributed.barrier(group=rendezvous_group)
+            trace("after_host_release", input_tensor)
+            return list(
+                output_tensor.view(world_size, *input_tensor.shape).unbind(0)
+            )
+
         # Allocate output tensor.
         input_size = list(input_.size())
         input_size[0] *= world_size
         output_tensor = torch.empty(input_size, dtype=input_.dtype, device=input_.device)
         # All-gather.
-        torch.distributed.all_gather_into_tensor(output_tensor, input_.contiguous(), group=group)
+        torch.distributed.all_gather_into_tensor(output_tensor, input_tensor, group=group)
         if dim != 0:
             input_size[0] //= world_size
             output_tensor = output_tensor.reshape(

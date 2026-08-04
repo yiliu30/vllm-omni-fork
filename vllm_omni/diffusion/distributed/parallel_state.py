@@ -56,6 +56,7 @@ _WORLD: GroupCoordinator | None = None
 _SP: SequenceParallelGroupCoordinator | None = None
 _PP: PipelineGroupCoordinator | None = None
 _CFG: GroupCoordinator | None = None
+_CFG_COLLECTIVE_RENDEZVOUS: torch.distributed.ProcessGroup | None = None
 _DP: GroupCoordinator | None = None
 _FS: GroupCoordinator | None = None  # Fully Sharded (HSDP shard dimension)
 _DIT: GroupCoordinator | None = None
@@ -519,6 +520,18 @@ def init_model_parallel_group(
         )
 
 
+def init_cpu_process_group(group_ranks: list[list[int]]) -> torch.distributed.ProcessGroup:
+    """Create host-only groups and return the group containing this rank."""
+    rank = torch.distributed.get_rank()
+    local_group = None
+    for ranks in group_ranks:
+        group = torch.distributed.new_group(ranks, backend="gloo")
+        if rank in ranks:
+            local_group = group
+    assert local_group is not None
+    return local_group
+
+
 def init_vllm_model_parallel_group(
     group_ranks: list[list[int]],
     local_rank: int,
@@ -862,7 +875,7 @@ def initialize_model_parallel(
     )
     vllm_parallel_state._DP = _DP
 
-    global _CFG
+    global _CFG, _CFG_COLLECTIVE_RENDEZVOUS
     assert _CFG is None, "classifier_free_guidance group is already initialized"
     _CFG = init_model_parallel_group(
         group_ranks=rank_generator.get_ranks("cfg"),
@@ -870,6 +883,18 @@ def initialize_model_parallel(
         backend=backend,
         parallel_mode="classifier_free_guidance",
     )
+    cfg_crosses_device_groups = (
+        cfg_parallel_size > 1
+        and tensor_parallel_size * sequence_parallel_size * pipeline_parallel_size > 1
+    )
+    if current_omni_platform.is_xpu() and cfg_crosses_device_groups:
+        # XCCL needs an all-model-rank control group to fence transitions
+        # between orthogonal TP/SP/PP and CFG device communicators. Keep DP
+        # replicas independent.
+        _CFG_COLLECTIVE_RENDEZVOUS = init_cpu_process_group(
+            rank_generator.get_ranks("tp-sp-pp-cfg")
+        )
+        _CFG.collective_rendezvous_group = _CFG_COLLECTIVE_RENDEZVOUS
     global _PP
     assert _PP is None, "pipeline model parallel group is already initialized"
     _PP = init_model_parallel_group(
@@ -961,7 +986,7 @@ def initialize_model_parallel(
 
 def destroy_model_parallel():
     """Set the groups to none and destroy them."""
-    global _DP, _CFG, _SP, _PP, _FS, _EXPERT_PARALLEL_GROUP_RANKS
+    global _DP, _CFG, _CFG_COLLECTIVE_RENDEZVOUS, _SP, _PP, _FS, _EXPERT_PARALLEL_GROUP_RANKS
 
     if vllm_parallel_state._DP and vllm_parallel_state._DP is not _DP:
         vllm_parallel_state._DP.destroy()
@@ -974,6 +999,10 @@ def destroy_model_parallel():
     if _CFG:
         _CFG.destroy()
     _CFG = None
+
+    if _CFG_COLLECTIVE_RENDEZVOUS is not None:
+        torch.distributed.destroy_process_group(_CFG_COLLECTIVE_RENDEZVOUS)
+    _CFG_COLLECTIVE_RENDEZVOUS = None
 
     if vllm_parallel_state._PCP and vllm_parallel_state._PCP is not _SP:
         vllm_parallel_state._PCP.destroy()
