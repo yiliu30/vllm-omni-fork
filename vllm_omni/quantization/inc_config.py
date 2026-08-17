@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 from torch.nn import Module
+from vllm.logger import init_logger
 from vllm.model_executor.layers.linear import LinearMethodBase
 from vllm.model_executor.layers.quantization.inc import INCConfig
 from vllm.model_executor.models.utils import WeightsMapper
@@ -21,6 +22,54 @@ if TYPE_CHECKING:
     )
 
 _REGEX_SPECIAL_CHARS = frozenset(r"*+?^$()[]{}|\\")
+
+logger = init_logger(__name__)
+
+
+def _autoround_mxfp8_activation_qdq(x: torch.Tensor) -> torch.Tensor:
+    """Match AutoRound's ``MXFP8QuantLinear.qdq_input`` exactly.
+
+    AutoRound's MXFP8 export is W8A8 even though its checkpoint only stores
+    the weight values and E8M0 scales.  Its reference module dynamically
+    quantizes then dequantizes every input in groups of 32 before the linear
+    operation.  vLLM's MXFP8 kernels normally receive a higher-precision
+    activation, so the software fallback must perform this QDQ explicitly to
+    reproduce the exported model.
+    """
+    block_size = 32
+    if x.shape[-1] % block_size:
+        raise ValueError(
+            "AutoRound MXFP8 activation QDQ requires the last dimension to "
+            f"be divisible by {block_size}, got {tuple(x.shape)}."
+        )
+
+    original_shape = x.shape
+    values = x.reshape(-1, block_size).float()
+    max_value = values.abs().amax(dim=-1, keepdim=True)
+    # AutoRound's ``quant_mx(..., data_type='mx_fp', bits=8)`` uses E4M3
+    # values (max 448) and an E8M0 shared exponent with a bias of 127.
+    shared_exponent = torch.where(
+        max_value == 0,
+        torch.ones_like(max_value),
+        torch.log2(max_value),
+    ).floor_()
+    shared_exponent.sub_(8).clamp_(min=-127, max=127)
+    scale = torch.exp2(shared_exponent)
+
+    values = (values / scale).clamp_(min=-448, max=448)
+    # Reproduce ``quant_element(..., ebits=4, mbits=5,
+    # mantissa_rounding='even')``.  ``torch.round`` uses the same ties-to-even
+    # behavior as AutoRound's explicit mask-and-floor implementation.
+    private_exponent = torch.floor(torch.log2(values.abs() + (values == 0).float()))
+    # E4M3 has four exponent bits, so its minimum normal private exponent is
+    # -(2**(4 - 1)) + 2 == -6.  The E8M0 shared exponent above has a much
+    # wider range; using that range here incorrectly preserves values which
+    # AutoRound rounds away.
+    private_exponent.clamp_(min=-6)
+    quantized = torch.round(values / torch.exp2(private_exponent) * 8)
+    values = quantized / 8 * torch.exp2(private_exponent)
+    values.clamp_(min=-448, max=448).mul_(scale)
+    return values.reshape(original_shape).to(dtype=x.dtype)
 
 
 def _stage_prefix(prefix_map: dict[str, str | None]) -> str:
@@ -74,8 +123,23 @@ class OmniINCConfig(INCConfig):
         """Get quantization method, handling AutoRound MXFP8 as a special case."""
         # Check if this is an AutoRound MXFP8 checkpoint (data_type="mx_fp")
         if hasattr(self, "data_type") and self.data_type == "mx_fp" and self.weight_bits == 8:
-            from vllm.model_executor.layers.linear import LinearBase
+            from vllm.model_executor.layers.linear import LinearBase, UnquantizedLinearMethod
 
+            # AutoRound quantizes only the transformer and token-refiner block
+            # families.  H3's patch projections, timestep MLP, AdaLN output
+            # projections, and final heads remain dense (and have no
+            # checkpoint weight_scale tensor).  Returning MXFP8 for those
+            # layers leaves an uninitialized scale and corrupts the output.
+            is_quantized_block = prefix.startswith(
+                (
+                    "blocks.",
+                    "token_refiner.blocks.",
+                    "transformer.blocks.",
+                    "transformer.token_refiner.blocks.",
+                )
+            )
+            if not is_quantized_block:
+                return UnquantizedLinearMethod() if isinstance(layer, LinearBase) else None
             if isinstance(layer, LinearBase):
                 return IncMxfp8OfflineLinearMethod()
             return None
@@ -189,12 +253,32 @@ class IncMxfp8OfflineLinearMethod(LinearMethodBase):
 
     def __init__(self) -> None:
         from vllm.model_executor.kernels.linear import init_mxfp8_linear_kernel
+        from vllm.model_executor.kernels.linear.mxfp8 import Mxfp8LinearLayerConfig
+        from vllm.model_executor.kernels.linear.mxfp8.emulation import (
+            EmulationMxfp8LinearKernel,
+        )
         from vllm.model_executor.layers.quantization.utils.mxfp8_utils import (
             MXFP8_BLOCK_SIZE,
             MXFP8_SCALE_DTYPE,
         )
 
-        self.kernel = init_mxfp8_linear_kernel()
+        kernel = init_mxfp8_linear_kernel()
+        # Some vLLM builds report FlashInfer MXFP8 as supported based on the
+        # GPU capability even when the installed FlashInfer wrapper does not
+        # expose mm_mxfp8.  Select the software path in that case so an
+        # AutoRound checkpoint remains runnable instead of failing on the
+        # first diffusion linear layer.
+        if kernel.__class__.__name__.startswith("FlashInfer"):
+            from vllm.utils import flashinfer as vllm_flashinfer
+
+            if not hasattr(vllm_flashinfer, "mm_mxfp8"):
+                logger.warning_once(
+                    "FlashInfer MXFP8 kernel is selected but mm_mxfp8 is unavailable; "
+                    "falling back to BF16 MXFP8 emulation."
+                )
+                kernel = EmulationMxfp8LinearKernel(Mxfp8LinearLayerConfig())
+
+        self.kernel = kernel
         self.block_size = MXFP8_BLOCK_SIZE
         self.scale_dtype = MXFP8_SCALE_DTYPE
 
@@ -271,6 +355,7 @@ class IncMxfp8OfflineLinearMethod(LinearMethodBase):
         ori_shape = x.shape
         if x.dim() > 2:
             x = x.reshape(-1, ori_shape[-1])
+        x = _autoround_mxfp8_activation_qdq(x)
         output = self.kernel.apply_weights(layer, x, bias)
         if len(ori_shape) > 2:
             output = output.reshape(*ori_shape[:-1], -1)

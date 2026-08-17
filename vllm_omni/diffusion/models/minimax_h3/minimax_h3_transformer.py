@@ -67,6 +67,7 @@ class MiniMaxH3DiTArchConfig:
     norm_eps: float = 1e-5
     qk_norm_eps: float = 1e-5
     final_norm_eps: float = 1e-5
+    rope_theta: float = 10000.0
 
     @classmethod
     def from_mapping(cls, config: Mapping[str, Any]) -> MiniMaxH3DiTArchConfig:
@@ -218,12 +219,21 @@ class MiniMaxH3Rope(nn.Module):
     with 16 frequencies per axis (inv_freq = base^-(arange(0,32,2)/32)).
     """
 
-    def __init__(self, inv_freq_len: int) -> None:
+    def __init__(self, inv_freq_len: int, rope_theta: float = 10000.0) -> None:
         super().__init__()
+        # Diffusers constructs this non-persistent frequency table from the
+        # configured RoPE base.  The MiniMax checkpoint does not serialize a
+        # ``rope.inv_freq`` tensor, so allocating an empty buffer here leaves
+        # attention dependent on uninitialized memory and corrupts video
+        # generation.
+        inv_freq = 1.0 / (
+            rope_theta
+            ** (torch.arange(0, 2 * inv_freq_len, 2, dtype=_FP32_DTYPE) / (2 * inv_freq_len))
+        )
         self.register_buffer(
             "inv_freq",
-            torch.empty(inv_freq_len, dtype=_FP32_DTYPE),
-            persistent=True,
+            inv_freq,
+            persistent=False,
         )
 
     def forward(self, img_position_ids: torch.Tensor) -> torch.Tensor:
@@ -409,6 +419,18 @@ class MiniMaxH3Attention(nn.Module):
                 f"max_seqlen must be within the packed sequence, got {max_seqlen} for length {packed_total}"
             )
         used = min(max_seqlen, packed_total)
+        # Diffusers' reference path runs SDPA independently over each packed
+        # document.  On the single-rank TORCH_SDPA validation path, use the
+        # same segmented formulation directly instead of routing through the
+        # generic attention layer's broadcast padding mask.
+        backend_name = getattr(self.attention.attn_backend, "get_name", lambda: "")()
+        if (
+            backend_name == "SDPA"
+            and not getattr(self.attention, "use_ring", False)
+            and q.shape[0] == packed_total
+        ):
+            return _sdpa_varlen_attention(q, k, v, cu_seqlens, self.softmax_scale)
+
         attn_mask = None
         # Ring attention can dispatch to a different implementation from the
         # configured backend, so the no-mask fast paths are local-only.
@@ -873,11 +895,13 @@ class MiniMaxH3DiTModel(nn.Module):
         },
         "sp_gather": SequenceParallelOutput(gather_dim=0, expected_dims=2),
     }
-    # The checkpoint already stores qkv and the MLP gate/up as single tensors
-    # (see the reordering in load_weights), so there are no unfused names for
-    # quantization or LoRA to map onto. Address the fused layers directly, e.g.
-    # ignored_layers=["blocks.0.attn.qkv_proj"].
-    packed_modules_mapping = {}
+    # Match the ModelOpt/Diffusers mapping used by vLLM-Omni PR #5848. The
+    # checkpoint adapter may expose logical shards (to_q/to_k/to_v and
+    # diffusers_weight) while the module remains fused at runtime.
+    packed_modules_mapping = {
+        "qkv_proj": ["to_q", "to_k", "to_v"],
+        "fc1": ["gate_proj", "up_proj"],
+    }
 
     def _validate_tp_config(self, *, arch: MiniMaxH3DiTArchConfig, tp_size: int) -> None:
         if tp_size < 1:
@@ -961,7 +985,7 @@ class MiniMaxH3DiTModel(nn.Module):
             arch,
             prefix="time_embedder",
         )
-        self.rope = MiniMaxH3Rope(arch.rope_inv_freq_len)
+        self.rope = MiniMaxH3Rope(arch.rope_inv_freq_len, arch.rope_theta)
         self.token_refiner = MiniMaxH3TokenRefiner(
             arch,
             quant_config,
@@ -1007,12 +1031,30 @@ class MiniMaxH3DiTModel(nn.Module):
         params.update(dict(self.named_buffers()))
         loaded: set[str] = set()
         for name, loaded_weight in weights:
-            param = params.get(name)
+            target_name = name
+            qkv_shard_id = None
+            diffusers_fc1 = False
+            for shard_id in ("q", "k", "v"):
+                marker = f".attn.qkv_proj.to_{shard_id}."
+                if marker in target_name:
+                    target_name = target_name.replace(marker, ".attn.qkv_proj.")
+                    qkv_shard_id = shard_id
+                    break
+            if target_name.endswith(".mlp.fc1.diffusers_weight"):
+                target_name = target_name.removesuffix(".diffusers_weight") + ".weight"
+                diffusers_fc1 = True
+            elif target_name.endswith(".mlp.fc1.diffusers_weight_scale"):
+                target_name = target_name.removesuffix(".diffusers_weight_scale") + ".weight_scale"
+                diffusers_fc1 = True
+
+            param = params.get(target_name)
             if param is None:
                 logger.warning("Skipping MiniMax H3 weight not present in model: %s", name)
                 continue
             weight_loader = getattr(param, "weight_loader", default_weight_loader)
-            if name.endswith(".attn.qkv_proj.weight"):
+            if qkv_shard_id is not None:
+                weight_loader(param, loaded_weight, qkv_shard_id)
+            elif target_name.endswith(".attn.qkv_proj.weight"):
                 # Transform checkpoint layout before entering vLLM's loader so
                 # online FP8 can keep ``online_process_loader`` outermost.
                 loaded_weight = _reorder_grouped_qkv_to_qkv(
@@ -1022,18 +1064,40 @@ class MiniMaxH3DiTModel(nn.Module):
                     head_dim=self.arch.attention_head_dim,
                 )
                 weight_loader(param, loaded_weight)
-            elif name.endswith(".mlp.fc1.weight"):
+            elif target_name.endswith(".mlp.fc1.weight"):
                 if loaded_weight.shape[0] % 2:
                     raise ValueError(
                         "MiniMax H3 fc1 checkpoint rows must split evenly into "
                         f"gate/up matrices, got {tuple(loaded_weight.shape)}"
                     )
-                gate, up = loaded_weight.chunk(2, dim=0)
+                first, second = loaded_weight.chunk(2, dim=0)
+                gate, up = (second, first) if diffusers_fc1 else (first, second)
                 weight_loader(param, gate, 0)
                 weight_loader(param, up, 1)
+            elif target_name.endswith(".mlp.fc1.weight_scale") and diffusers_fc1:
+                # MXFP8 block scales are [out_features, num_blocks], while
+                # ModelOpt static/per-channel scales may be scalar or 1-D.
+                # Preserve the leading output dimension for block scales.
+                if loaded_weight.ndim >= 2 and loaded_weight.shape[0] % 2 == 0:
+                    first, second = loaded_weight.chunk(2, dim=0)
+                else:
+                    scales = loaded_weight.reshape(-1)
+                    if scales.numel() % 2:
+                        raise ValueError(
+                            "MiniMax H3 Diffusers fc1 weight_scale must have an even "
+                            f"number of values, got {tuple(loaded_weight.shape)}"
+                        )
+                    first, second = scales.chunk(2)
+                if first.numel() == 0 or second.numel() == 0:
+                    raise ValueError(
+                        "MiniMax H3 Diffusers fc1 weight_scale must have an even "
+                        f"number of values, got {tuple(loaded_weight.shape)}"
+                    )
+                weight_loader(param, second, 0)
+                weight_loader(param, first, 1)
             else:
                 weight_loader(param, loaded_weight)
-            loaded.add(name)
+            loaded.add(target_name)
         return loaded
 
     @staticmethod

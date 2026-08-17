@@ -175,6 +175,39 @@ def _resolve_component_quant_config(quant_config, component: str):
     return quant_config
 
 
+def _normalize_minimax_h3_quant_config(quant_config):
+    """Translate AutoRound's Diffusers block selectors to native H3 names."""
+    if quant_config is None or not hasattr(quant_config, "block_name_to_quantize"):
+        return quant_config
+    names = quant_config.block_name_to_quantize
+    if isinstance(names, str):
+        names = [name.strip() for name in names.split(",") if name.strip()]
+    if not names:
+        return quant_config
+    replacements = {
+        "transformer_blocks": "blocks",
+        "token_refiner.refiner_blocks": "token_refiner.blocks",
+    }
+
+    def normalize_name(name: str) -> str:
+        for source, target in replacements.items():
+            if name == source or name.startswith(source + "."):
+                return target + name[len(source) :]
+        return name
+
+    quant_config.block_name_to_quantize = [normalize_name(name) for name in names]
+
+    # AutoRound uses the same Diffusers paths in ``extra_config`` for layers
+    # deliberately retained in BF16. The model uses native H3 paths, so map
+    # these exemptions alongside the block selectors.
+    extra_config = getattr(quant_config, "extra_config", None)
+    if isinstance(extra_config, dict):
+        quant_config.extra_config = {
+            normalize_name(name): value for name, value in extra_config.items()
+        }
+    return quant_config
+
+
 def _minimax_h3_post_process(output, output_type: str = "np"):
     """Convert the joint video/audio output without capturing worker state.
 
@@ -631,6 +664,7 @@ class MiniMaxH3Pipeline(
             od_config.quantization_config,
             "transformer",
         )
+        transformer_quant_config = _normalize_minimax_h3_quant_config(transformer_quant_config)
         self.transformer = MiniMaxH3DiTModel(
             od_config,
             quant_config=transformer_quant_config,
@@ -1340,25 +1374,29 @@ class MiniMaxH3Pipeline(
         latent_w: int,
         audio_t: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        video_generator = torch.Generator(device="cpu").manual_seed(seed)
+        # The Diffusers reference consumes one request generator in draw
+        # order: all video noise first, followed by the audio rows.  Reusing
+        # that generator here is important because audio and video share one
+        # packed attention sequence; re-seeding a second generator for audio
+        # changes the video denoiser input even with the same request seed.
+        generator = torch.Generator(device="cpu").manual_seed(seed)
         video = torch.randn(
             1,
             24,
             latent_t,
             latent_h,
             latent_w,
-            generator=video_generator,
+            generator=generator,
             dtype=torch.float32,
         )
         video_rows = minimax_h3_patchify_video_latent(
             video,
             patch_size=(1, 2, 2),
         )
-        audio_generator = torch.Generator(device="cpu").manual_seed(seed)
         audio_rows = torch.randn(
             audio_t * 2,
             32,
-            generator=audio_generator,
+            generator=generator,
             dtype=torch.float32,
         )
         return video_rows, audio_rows
