@@ -175,34 +175,6 @@ def _resolve_component_quant_config(quant_config, component: str):
     return quant_config
 
 
-def _normalize_minimax_h3_quant_config(quant_config):
-    """Translate AutoRound's Diffusers block selectors to native H3 names."""
-    if quant_config is None or not hasattr(quant_config, "block_name_to_quantize"):
-        return quant_config
-    names = quant_config.block_name_to_quantize
-    if isinstance(names, str):
-        names = [name.strip() for name in names.split(",") if name.strip()]
-    if not names:
-        return quant_config
-
-    replacements = {
-        "transformer_blocks": "blocks",
-        "token_refiner.refiner_blocks": "token_refiner.blocks",
-    }
-
-    def normalize_name(name: str) -> str:
-        for source, target in replacements.items():
-            if name == source or name.startswith(source + "."):
-                return target + name[len(source) :]
-        return name
-
-    quant_config.block_name_to_quantize = [normalize_name(name) for name in names]
-    extra_config = getattr(quant_config, "extra_config", None)
-    if isinstance(extra_config, dict):
-        quant_config.extra_config = {normalize_name(name): value for name, value in extra_config.items()}
-    return quant_config
-
-
 def _minimax_h3_post_process(output, output_type: str = "np"):
     """Convert the joint video/audio output without capturing worker state.
 
@@ -659,7 +631,6 @@ class MiniMaxH3Pipeline(
             od_config.quantization_config,
             "transformer",
         )
-        transformer_quant_config = _normalize_minimax_h3_quant_config(transformer_quant_config)
         self.transformer = MiniMaxH3DiTModel(
             od_config,
             quant_config=transformer_quant_config,
