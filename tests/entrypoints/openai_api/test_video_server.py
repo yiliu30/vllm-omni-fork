@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
+import av
 import numpy as np
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -31,7 +32,7 @@ from vllm_omni.entrypoints.openai.protocol.videos import (
     VideoParams,
     VideoResponse,
 )
-from vllm_omni.entrypoints.openai.serving_video import OmniOpenAIServingVideo
+from vllm_omni.entrypoints.openai.serving_video import OmniOpenAIServingVideo, ReferenceImage
 from vllm_omni.entrypoints.openai.storage import LocalStorageManager
 from vllm_omni.entrypoints.openai.stores import AsyncDictStore, TaskRegistry
 from vllm_omni.errors import GuardrailViolationError
@@ -249,6 +250,25 @@ def _make_test_video_bytes(size=(32, 24), num_frames=3) -> bytes:
     return mux_video_audio_bytes(frames, fps=8, video_codec_options={"preset": "ultrafast", "threads": "0"})
 
 
+def test_mux_video_audio_marks_aac_priming_timestamp():
+    frames = np.zeros((2, 16, 16, 3), dtype=np.uint8)
+    audio = np.zeros((2, 2048), dtype=np.float32)
+
+    payload = mux_video_audio_bytes(
+        frames,
+        fps=24,
+        audio_waveform=audio,
+        audio_sample_rate=32000,
+        video_codec_options={"preset": "ultrafast", "threads": "0"},
+    )
+
+    with av.open(io.BytesIO(payload)) as container:
+        audio_stream = container.streams.audio[0]
+        first_packet = next(packet for packet in container.demux(audio_stream) if packet.pts is not None)
+
+    assert first_packet.pts < 0
+
+
 def _make_test_video_data_url(size=(32, 24), num_frames=3) -> str:
     encoded = base64.b64encode(_make_test_video_bytes(size, num_frames)).decode("utf-8")
     return f"data:video/mp4;base64,{encoded}"
@@ -439,6 +459,51 @@ def test_i2v_video_generation_resizes_input_to_requested_dimensions(test_client,
     input_image = prompt["multi_modal_data"]["image"]
     assert isinstance(input_image, Image.Image)
     assert input_image.size == (96, 64)
+
+
+def test_i2v_resize_policy_can_defer_to_pipeline(monkeypatch):
+    engine = FakeAsyncOmni()
+    engine.get_diffusion_od_config = lambda: SimpleNamespace(
+        model="org/model",
+        model_class_name="ExamplePipeline",
+        revision="pinned-revision",
+    )
+    captured = {}
+
+    def fake_policy(model_class_name, *, model, revision=None):
+        captured.update(
+            model_class_name=model_class_name,
+            model=model,
+            revision=revision,
+        )
+        return True
+
+    monkeypatch.setattr(
+        "vllm_omni.entrypoints.openai.serving_video.should_preserve_reference_image_size",
+        fake_policy,
+    )
+    handler = OmniOpenAIServingVideo.for_diffusion(
+        diffusion_engine=engine,
+        model_name="fallback/model",
+    )
+    image = Image.new("RGB", (48, 32))
+
+    asyncio.run(
+        handler._run_and_extract(
+            VideoGenerationRequest(prompt="A bear playing with yarn.", width=96, height=64),
+            "pipeline-owned-resize",
+            reference_image=ReferenceImage(image),
+        )
+    )
+
+    input_image = engine.captured_prompt["multi_modal_data"]["image"]
+    assert isinstance(input_image, Image.Image)
+    assert input_image.size == (48, 32)
+    assert captured == {
+        "model_class_name": "ExamplePipeline",
+        "model": "org/model",
+        "revision": "pinned-revision",
+    }
 
 
 def test_i2v_extra_params_dimensions_preserve_input_image_geometry(test_client, mocker: MockerFixture):
