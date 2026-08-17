@@ -1386,25 +1386,24 @@ class MiniMaxH3Pipeline(
         latent_w: int,
         audio_t: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        video_generator = torch.Generator(device="cpu").manual_seed(seed)
+        generator = torch.Generator(device="cpu").manual_seed(seed)
         video = torch.randn(
             1,
             24,
             latent_t,
             latent_h,
             latent_w,
-            generator=video_generator,
+            generator=generator,
             dtype=torch.float32,
         )
         video_rows = minimax_h3_patchify_video_latent(
             video,
             patch_size=(1, 2, 2),
         )
-        audio_generator = torch.Generator(device="cpu").manual_seed(seed)
         audio_rows = torch.randn(
             audio_t * 2,
             32,
-            generator=audio_generator,
+            generator=generator,
             dtype=torch.float32,
         )
         return video_rows, audio_rows

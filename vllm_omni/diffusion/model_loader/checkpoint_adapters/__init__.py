@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 from torch import nn
 
+from .minimax_h3 import MiniMaxH3W4CheckpointAdapter
 from .modelopt import (
     ModelOptFp8CheckpointAdapter,
     ModelOptMixedPrecisionCheckpointAdapter,
@@ -21,7 +22,9 @@ def get_checkpoint_adapter(
     source: object,
     quant_config: object | None,
     use_safetensors: bool,
-) -> ModelOptFp8CheckpointAdapter | ModelOptNvFp4CheckpointAdapter | ModelOptMixedPrecisionCheckpointAdapter | None:
+) -> MiniMaxH3W4CheckpointAdapter | ModelOptFp8CheckpointAdapter | ModelOptNvFp4CheckpointAdapter | ModelOptMixedPrecisionCheckpointAdapter | None:
+    if MiniMaxH3W4CheckpointAdapter.is_compatible(model, source, quant_config, use_safetensors):
+        return MiniMaxH3W4CheckpointAdapter(model, source)
     if ModelOptFp8CheckpointAdapter.is_compatible(source, quant_config, use_safetensors):
         return ModelOptFp8CheckpointAdapter(model, source)
     if ModelOptNvFp4CheckpointAdapter.is_compatible(source, quant_config, use_safetensors):
@@ -35,6 +38,7 @@ __all__ = [
     "ModelOptFp8CheckpointAdapter",
     "ModelOptMixedPrecisionCheckpointAdapter",
     "ModelOptNvFp4CheckpointAdapter",
+    "MiniMaxH3W4CheckpointAdapter",
     "get_checkpoint_adapter",
     "get_direct_mmap_adapter",
 ]
