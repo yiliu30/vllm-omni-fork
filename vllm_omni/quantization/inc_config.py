@@ -7,10 +7,12 @@ from __future__ import annotations
 from os.path import commonprefix
 from typing import TYPE_CHECKING, Any
 
+from vllm.model_executor.layers.linear import LinearBase
 from vllm.model_executor.layers.quantization.inc import INCConfig
-from vllm.model_executor.layers.quantization.inc.inc_linear import INCLinearMethod
 from vllm.model_executor.models.utils import WeightsMapper
 
+from vllm_omni.platforms import current_omni_platform
+from vllm_omni.quantization.mxfp4_config import VllmMxfp4OfflineLinearMethod
 from vllm_omni.quantization.mxfp8_config import VllmMxfp8OfflineLinearMethod
 
 if TYPE_CHECKING:
@@ -50,17 +52,17 @@ def _map_with_stage_prefix(
 class OmniINCConfig(INCConfig):
     """INCConfig extended with multi-stage prefix remapping.
 
-    Quantization itself is vLLM's: :class:`INCConfig` resolves an ``INCScheme``
-    per layer, covering AutoRound INT4/INT8, MXFP4 (linear + MoE) and MXFP8
-    (linear only, via ``INCMxfp8LinearScheme`` → ``XPUMxFp8LinearKernel``). The
-    only omni-specific delta is that diffusion transformers hand their linear
-    layers ``(batch, seq, hidden)`` activations, so MXFP8 linear methods are
-    wrapped in :class:`VllmMxfp8OfflineLinearMethod`.
+    :class:`INCConfig` is used for AutoRound checkpoint detection and per-layer
+    config resolution only. MX linears are served by omni's own methods on top of
+    the XPU kernels; no INC linear method or scheme is involved.
 
     Architecture:
       - AutoRound INT4/INT8 → vLLM INCWna16Scheme
-      - AutoRound MXFP4 (data_type="mx_fp", bits=4) → vLLM INCMxfp4Scheme
-      - AutoRound MXFP8 (data_type="mx_fp", bits=8) → vLLM INCMxfp8Scheme
+      - AutoRound MXFP4 (data_type="mx_fp", bits=4), XPU → VllmMxfp4OfflineLinearMethod
+        → XPUMxFp4LinearKernel
+      - AutoRound MXFP8 (data_type="mx_fp", bits=8), XPU → VllmMxfp8OfflineLinearMethod
+        → XPUMxFp8LinearKernel
+      - AutoRound MXFP4 / MXFP8 on other platforms → vLLM INCMxfp4Scheme / INCMxfp8Scheme
       - Native MXFP8 (quant_method="mxfp8") → DiffusionMXFP8Config (see mxfp8_config.py)
     """
 
@@ -69,11 +71,21 @@ class OmniINCConfig(INCConfig):
     # ------------------------------------------------------------------
 
     def get_quant_method(self, layer, prefix: str):
-        """Delegate to vLLM, adding 3-D activation support for MXFP8 linears."""
-        method = super().get_quant_method(layer, prefix)
-        if self.is_mxfp8 and isinstance(method, INCLinearMethod):
-            return VllmMxfp8OfflineLinearMethod(method.scheme)
-        return method
+        """MX linears go straight to the XPU kernels; everything else is vLLM's.
+
+        Resolved from the layer config rather than from vLLM's INC method, so no
+        INC scheme (and no second kernel selection) is built just to be dropped.
+        XPU only: the XPU kernels assert is_supported() in their constructor, so
+        other platforms keep vLLM's INC schemes and their own kernel selection.
+        """
+        if self.is_mxfp and current_omni_platform.is_xpu() and isinstance(layer, LinearBase):
+            layer_config = self.config_parser.resolve(layer, prefix)
+            if layer_config.quantized:
+                if layer_config.is_mxfp8:
+                    return VllmMxfp8OfflineLinearMethod()
+                if layer_config.is_mxfp4:
+                    return VllmMxfp4OfflineLinearMethod(group_size=layer_config.group_size)
+        return super().get_quant_method(layer, prefix)
 
     def apply_vllm_mapper(self, hf_to_vllm_mapper: WeightsMapper) -> None:
         """Remap HF checkpoint names to vLLM runtime prefixes."""
