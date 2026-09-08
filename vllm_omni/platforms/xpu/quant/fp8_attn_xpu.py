@@ -10,11 +10,17 @@ per-tensor descales, which is the layout combination the kernel is tuned for.
 from __future__ import annotations
 
 import math
+from contextlib import nullcontext
 from functools import lru_cache
 
 import torch
 
-from vllm_omni.diffusion.profiler.device_op_timer import device_op_timer
+try:
+    from vllm_omni.diffusion.profiler.device_op_timer import device_op_timer
+except ModuleNotFoundError as exc:
+    if exc.name != "vllm_omni.diffusion.profiler.device_op_timer":
+        raise
+    device_op_timer = nullcontext
 
 # The kernel accumulates in a reduced-range format, so descales target a
 # quantization range well below the fp8_e4m3 max (448) to keep headroom.

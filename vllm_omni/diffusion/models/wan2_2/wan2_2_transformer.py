@@ -43,6 +43,12 @@ from vllm_omni.diffusion.distributed.sp_plan import (
 from vllm_omni.diffusion.forward_context import build_local_sp_padding_mask, get_forward_context
 from vllm_omni.diffusion.layers.adalayernorm import AdaLayerNorm
 from vllm_omni.diffusion.layers.norm import LayerNorm, RMSNorm
+from vllm_omni.diffusion.profiler.device_op_timer import (
+    device_op_timer as wan_device_op_timer,
+    get_device_op_timing_summary as get_wan_device_op_timing_summary,
+    is_device_op_timing_enabled as is_wan_device_op_timing_enabled,
+    reset_device_op_timing as reset_wan_device_op_timing,
+)
 from vllm_omni.diffusion.layers.rope import RotaryEmbeddingWan
 from vllm_omni.platforms import current_omni_platform
 

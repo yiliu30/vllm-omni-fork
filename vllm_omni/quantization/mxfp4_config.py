@@ -7,6 +7,7 @@ Architecture mirrors mxfp8_config.py:
   MXFPLinearMethodBase                    – platform-agnostic skeleton (imported from mxfp8_config)
     NPUMxfp4LinearMethod                  – NPU single-scale offline (W4A4 MXFP4)
       NPUMxfp4OnlineLinearMethod          – NPU single-scale online (BF16 → FP4)
+    XPUMxfp4OnlineLinearMethod            – XPU single-scale online (BF16 → FP4)
     ROCmMxfp4LinearMethod                 – ROCm base class (AITER quant + shuffle; online-only)
       ROCmMxfp4OnlineLinearMethod         – ROCm online (BF16 → FP4 via AITER)
     NPUMxfp4DualScaleLinearMethod         – NPU dual-scale offline (W4A4 MXFP4 DualScale)
@@ -164,9 +165,16 @@ class DiffusionMXFP4Config(QuantizationConfig):
                 if self.is_checkpoint_mxfp4_serialized:
                     raise NotImplementedError("Pre-quantized MXFP4 checkpoints are not yet supported on ROCm.")
                 return ROCmMxfp4OnlineLinearMethod(self)
+            if current_omni_platform.is_xpu():
+                if self.is_checkpoint_mxfp4_serialized:
+                    raise NotImplementedError(
+                        "Pre-quantized MXFP4 checkpoints are not yet supported on XPU. "
+                        "Use online MXFP4 mode without is_checkpoint_mxfp4_serialized."
+                    )
+                return XPUMxfp4OnlineLinearMethod(self)
             raise NotImplementedError(
                 "DiffusionMXFP4Config (W4A4 MXFP4) is currently only supported "
-                "on NPU (Ascend) and ROCm (AMD, gfx950) platforms."
+                "on NPU (Ascend), XPU (Intel), and ROCm (AMD, gfx950) platforms."
             )
         return None
 
@@ -341,6 +349,101 @@ class NPUMxfp4OnlineLinearMethod(_LazyWeightMixin, NPUMxfp4LinearMethod):
         replace_parameter(layer, "weight", weight_fp4)
         replace_parameter(layer, "weight_scale", weight_scale)
         layer._already_called_process_weights_after_loading = True
+
+
+# ---------------------------------------------------------------------------
+# XPU MXFP4 single-scale online method (BF16 checkpoint → quantize at load time)
+# ---------------------------------------------------------------------------
+
+
+class XPUMxfp4OnlineLinearMethod(_LazyWeightMixin, MXFPLinearMethodBase):
+    """XPU W4A4 MXFP4 online linear method using vLLM's native XPU kernel."""
+
+    def __init__(self, quant_config: DiffusionMXFP4Config) -> None:
+        from vllm.model_executor.kernels.linear import init_mxfp4_linear_kernel
+
+        self.quant_config = quant_config
+        self.kernel = init_mxfp4_linear_kernel()
+
+    def create_weights(
+        self,
+        layer: torch.nn.Module,
+        input_size_per_partition: int,
+        output_partition_sizes: list[int],
+        input_size: int,
+        output_size: int,
+        params_dtype: torch.dtype,
+        **extra_weight_attrs,
+    ) -> None:
+        if input_size_per_partition % 32 != 0:
+            raise ValueError(
+                "MXFP4 requires input_size_per_partition "
+                f"({input_size_per_partition}) to be divisible by 32."
+            )
+        super().create_weights(
+            layer,
+            input_size_per_partition,
+            output_partition_sizes,
+            input_size,
+            output_size,
+            params_dtype,
+            **extra_weight_attrs,
+        )
+
+    def process_weights_after_loading(self, layer: Module) -> None:
+        if getattr(layer, "_already_called_process_weights_after_loading", False):
+            return
+
+        if layer.weight.device == torch.device("meta"):
+            weight = ModelWeightParameter(
+                data=torch.empty_like(layer.weight, device=layer._load_device),
+                input_dim=1,
+                output_dim=0,
+                weight_loader=layer.weight.weight_loader,
+            )
+            _copy_missing_attrs(layer.weight, weight)
+            layer.register_parameter("weight", weight)
+            initialize_single_dummy_weight(layer.weight)
+
+        # Importing the XPU op module registers vllm.xpu_mxfp4_quantize.
+        import vllm._xpu_ops  # noqa: F401
+        from vllm.model_executor.layers.quantization.utils.mxfp4_utils import (
+            xpu_mxfp4_quantize,
+        )
+
+        weight_fp4, weight_scale = xpu_mxfp4_quantize(layer.weight.contiguous())
+        replace_parameter(layer, "weight", weight_fp4.data)
+        replace_parameter(layer, "weight_scale", weight_scale.data)
+        self.kernel.process_weights_after_loading(layer)
+        layer._already_called_process_weights_after_loading = True
+
+    def _quantize_activation(
+        self,
+        x: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        import vllm._xpu_ops  # noqa: F401
+        from vllm.model_executor.layers.quantization.utils.mxfp4_utils import (
+            xpu_mxfp4_quantize,
+        )
+
+        return xpu_mxfp4_quantize(x.contiguous())
+
+    def _quant_matmul(
+        self,
+        x_q: torch.Tensor,
+        x_scale: torch.Tensor,
+        layer: torch.nn.Module,
+        bias: torch.Tensor | None,
+        ori_dtype: torch.dtype,
+    ) -> torch.Tensor:
+        return torch.ops._xpu_C.fp4_gemm(
+            x_q,
+            layer.weight,
+            x_scale,
+            layer.weight_scale,
+            ori_dtype,
+            bias,
+        )
 
 
 # ---------------------------------------------------------------------------

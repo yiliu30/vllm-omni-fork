@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import os
+from contextlib import nullcontext
 
 import torch
 from vllm.logger import init_logger
@@ -11,7 +12,12 @@ from vllm_omni.diffusion.attention.backends.abstract import (
     AttentionImpl,
     AttentionMetadata,
 )
-from vllm_omni.diffusion.profiler.device_op_timer import device_op_timer
+try:
+    from vllm_omni.diffusion.profiler.device_op_timer import device_op_timer
+except ModuleNotFoundError as exc:
+    if exc.name != "vllm_omni.diffusion.profiler.device_op_timer":
+        raise
+    device_op_timer = nullcontext
 from vllm_omni.platforms import current_omni_platform
 
 logger = init_logger(__name__)
