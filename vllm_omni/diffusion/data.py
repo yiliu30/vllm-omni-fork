@@ -5,6 +5,7 @@ import copy
 import math
 import os
 import random
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields
 from enum import Enum, StrEnum
@@ -97,7 +98,33 @@ def normalize_omni_diffusion_kwargs(kwargs: Mapping[str, Any]) -> dict[str, Any]
         if key in normalized and normalized[key] is None:
             normalized[key] = {}
 
+    # cpu_offload_models arrives as a comma/space separated string from the CLI
+    # and as a list from YAML; the config field is a tuple either way. Empty and
+    # None both mean "no selective offload".
+    if "cpu_offload_models" in normalized:
+        normalized["cpu_offload_models"] = parse_component_name_list(normalized["cpu_offload_models"])
+
     return normalized
+
+
+def parse_component_name_list(value: Any) -> tuple[str, ...]:
+    """Normalize a component-name selector to a de-duplicated tuple.
+
+    Accepts ``None``, a ``str`` ("text_encoder,vae" or "text_encoder vae"), or any
+    sequence of strings. Order is preserved so log output matches what the user
+    typed, which matters when a name turns out to be unrecognised.
+    """
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        parts = [part.strip() for part in re.split(r"[,;\s]+", value)]
+    else:
+        parts = [str(part).strip() for part in value]
+    seen: dict[str, None] = {}
+    for part in parts:
+        if part:
+            seen.setdefault(part, None)
+    return tuple(seen)
 
 
 def validate_host_weight_runtime_options(*, mode: object, root: object) -> None:
@@ -803,6 +830,16 @@ class OmniDiffusionConfig:
     # - Text encoders run on GPU while DiT is on CPU
     # - DiT runs on GPU while encoders are on CPU
     enable_cpu_offload: bool = False
+    # Selective model-level offload: names of pipeline components to keep on CPU
+    # (e.g. ("text_encoder", "vae")). Everything else stays resident on the
+    # device. Unlike enable_cpu_offload, which swaps whole categories -- DiTs
+    # out, encoders/VAE in -- this names the components explicitly, so a
+    # component used once per request (a text encoder) can be the one that
+    # offloads while the DiT stays resident. Names are pipeline attributes; see
+    # ModuleDiscovery's fallback lists for the recognised ones.
+    # Non-empty implies model-level offloading, so enable_cpu_offload need not
+    # also be set.
+    cpu_offload_models: tuple[str, ...] = ()
     # Layer-wise offloading (block-level offloading) parameters
     enable_layerwise_offload: bool = False
     # Distributed layer-wise offloading with H2D + AllGather overlap (RFC-1)

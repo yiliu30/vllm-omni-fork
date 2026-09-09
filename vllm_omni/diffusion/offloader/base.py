@@ -46,6 +46,9 @@ class OffloadStrategy(Enum):
 class OffloadConfig:
     strategy: OffloadStrategy
     pin_cpu_memory: bool = True
+    # Selective model-level offload: pipeline component names to keep on CPU.
+    # Empty means the legacy behaviour -- offload whole categories by role.
+    offload_models: tuple[str, ...] = ()
     use_hsdp: bool = False
     dp_size: int = 1  # derived from parallel_config, not user-configurable
     # True: add DP sharding + AllGather. False: stream complete rank-local
@@ -75,6 +78,9 @@ class OffloadConfig:
             OffloadConfig with validated settings
         """
         enable_cpu_offload = getattr(od_config, "enable_cpu_offload", False)
+        # A non-empty selective list implies model-level offloading, so the user
+        # does not have to pass --enable-cpu-offload as well.
+        offload_models = tuple(getattr(od_config, "cpu_offload_models", ()) or ())
         enable_layerwise_offload = getattr(od_config, "enable_layerwise_offload", False)
         enable_distributed_layerwise_offload = getattr(od_config, "enable_distributed_layerwise_offload", False)
         pin_cpu_memory = getattr(od_config, "pin_cpu_memory", True)
@@ -114,10 +120,20 @@ class OffloadConfig:
                     "Both model-level and layer-wise offloading enabled. "
                     "Layer-wise takes priority, disabling model-level offloading."
                 )
-        elif enable_cpu_offload:
+        elif enable_cpu_offload or offload_models:
             strategy = OffloadStrategy.MODEL_LEVEL
         else:
             strategy = OffloadStrategy.NONE
+
+        # Layer-wise strategies own their own placement, so a selective model-level
+        # list would be silently ignored there. Say so rather than pretending.
+        if offload_models and strategy is not OffloadStrategy.MODEL_LEVEL:
+            logger.warning(
+                "cpu_offload_models=%s is ignored: %s offloading manages placement itself.",
+                list(offload_models),
+                strategy.value,
+            )
+            offload_models = ()
 
         # With dlo_use_allgather=False, do not add another DP shard. Each rank
         # streams the tensors produced by the standard loader, which may
@@ -162,6 +178,7 @@ class OffloadConfig:
         return cls(
             strategy=strategy,
             pin_cpu_memory=pin_cpu_memory,
+            offload_models=offload_models,
             use_hsdp=use_hsdp,
             dp_size=dp_size,
             dlo_use_allgather=dlo_use_allgather,

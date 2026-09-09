@@ -285,6 +285,15 @@ class DiffusionModelRunner(OmniConnectorModelRunnerMixin):
             device=self.device,
         )
 
+        # NOTE cpu_offload_models is deliberately NOT in this list. The whole-pipeline
+        # strategies need a CPU landing zone because the model may not fit on the
+        # device at all. A selective list means the opposite: the user is keeping most
+        # components resident, so they are asserting the resident set fits. Loading
+        # everything to CPU first would then make host RAM the binding constraint --
+        # e.g. the bf16 Wan2.2 pipeline is ~68 GiB of weights against 61 GiB of host
+        # RAM, so it would OOM the host before reaching the device. Loading on device
+        # and evicting only the named components needs host RAM for the offloaded
+        # subset alone.
         load_device = (
             "cpu"
             if self.od_config.enable_cpu_offload

@@ -709,6 +709,18 @@ class OmniServeCommand(CLISubcommand):
             help="Enable CPU offloading for diffusion models.",
         )
         omni_config_group.add_argument(
+            "--cpu-offload-models",
+            type=str,
+            default=None,
+            help="Comma-separated pipeline components to keep on CPU, e.g. "
+            "'text_encoder,vae'. Everything else stays resident on the device. "
+            "Unlike --enable-cpu-offload, which swaps DiTs against encoders by "
+            "role, this names the components explicitly, so a component used "
+            "once per request can be the only one offloaded while the DiT stays "
+            "resident. Implies model-level offloading. Unknown names are an "
+            "error listing what the pipeline actually exposes.",
+        )
+        omni_config_group.add_argument(
             "--enable-layerwise-offload",
             action="store_true",
             help="Enable layerwise (blockwise) offloading on DiT modules.",

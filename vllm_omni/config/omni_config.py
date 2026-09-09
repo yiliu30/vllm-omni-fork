@@ -697,6 +697,9 @@ class _DiffusionConfigProjection:
     max_cpu_loras: int | None = None
     output_type: str = "pil"
     enable_cpu_offload: bool = False
+    # Comma-separated component names, or a sequence; normalized to a tuple by
+    # normalize_omni_diffusion_kwargs.
+    cpu_offload_models: str | tuple[str, ...] | None = None
     enable_layerwise_offload: bool = False
     enable_distributed_layerwise_offload: bool = False
     dlo_use_allgather: bool = True
