@@ -54,10 +54,40 @@ python -c "import sageattn3; print(sageattn3.__file__)"
 vllm-omni serve <model> --diffusion-attention-backend SAGE_ATTN_3
 ```
 
-`SAGE_ATTN_3` requires CUDA, an importable `sageattn3`, and a Blackwell-class
-GPU. Its kernel assumes the query-head count equals the key/value-head count.
-GQA and MQA diffusion calls therefore fall back to PyTorch SDPA for
-correctness.
+On CUDA, `SAGE_ATTN_3` uses the SageAttention3 Blackwell kernel and requires
+an importable `sageattn3` plus a Blackwell-class GPU.
+
+### XPU (Sage V3 Hybrid via deepklox)
+
+On Intel XPU, `SAGE_ATTN_3` uses the DeepKloX Sage V3 Hybrid kernel (MXFP4
+Q/K + MXFP8 E4M3 P/V). The kernel is available through the `deepklox`
+package, which the CRI image builds with the Sage V3 Hybrid kernel enabled
+(`DEEPKLOX_SAGEATTN_V3_HYBRID=1`) and bakes into the environment before
+vLLM-Omni is installed.
+
+Verify the installation:
+
+```bash
+python -c "from deepklox.sageattn_interface import sageattn_v3_hybrid; print('deepklox v3 hybrid OK')"
+```
+
+The kernel contract is: CRI (Xe3P) hardware only, contiguous BF16 HND
+tensors, `batch=1`, equal query/key-value head counts, `head_dim=128`, and
+non-causal self-attention. Calls outside the contract (GQA/MQA, causal
+attention, `batch>1`, other head sizes, cross-attention) fall back to
+PyTorch SDPA with a one-time warning.
+
+Environment variables (read by the backend module):
+
+- `SAGE_ATTN_FORCE_SDPA_BLOCKS` — comma-separated transformer layer indices
+  that must run plain SDPA instead of the quantized kernel (selective
+  fallback).
+- `SAGE_ATTN_REPORT_FALLBACKS=1` — print kernel/fallback dispatch counters
+  (`sage`, `forced_sdpa`, `cross_sdpa`, `sdpa_fallback`, `nonfinite_sdpa`)
+  at process exit. Counters can also be inspected with
+  `vllm_omni.diffusion.attention.backends.sage_attn3.get_sage_attn3_call_counts()`.
+- `SAGE_ATTN_DEBUG_CHECK_FINITE=1` — after each kernel call, re-run the call
+  with SDPA if the output contains non-finite values.
 
 For common configuration and platform routing, see the
 [attention backend overview](../attention_backends.md).
