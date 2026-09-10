@@ -42,8 +42,9 @@ def test_config_from_checkpoint_dict() -> None:
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
-        ({"rank": 0}, "rank must be positive"),
-        ({"precision": "int4"}, "NVFP4 checkpoints only"),
+        ({"rank": 0}, "branchless rank=0"),
+        # NVFP4 used to be the only accepted precision, so the message now lists both.
+        ({"precision": "int4"}, "supports precision"),
         ({"act_unsigned": True}, "unsigned activations"),
     ],
 )

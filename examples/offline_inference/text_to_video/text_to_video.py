@@ -346,6 +346,13 @@ def parse_args() -> argparse.Namespace:
         choices=["fp8", "mxfp8", "mxfp4", "mxfp4_dualscale", "int8"],
         help="Quantization method for the transformer. mxfp8: W8A8 MXFP8 (NPU). mxfp4: W4A4 MXFP4 (NPU). mxfp4_dualscale: W4A4 MXFP4 dual-scale + BF16 fallback mixed (NPU). fp8: online FP8 (GPU).",
     )
+    parser.add_argument(
+        "--init-timeout",
+        type=int,
+        default=None,
+        help="Seconds to wait for the engine to finish loading. Quantization that derives "
+        "weights while loading (for example SVDQuant MXFP4) needs more than the 600s default.",
+    )
 
     # Distributed and parallel execution
     parser.add_argument(
@@ -518,6 +525,8 @@ def main():
         omni_kwargs["flow_shift"] = args.flow_shift
     if args.quantization is not None:
         omni_kwargs["quantization"] = args.quantization
+    if args.init_timeout is not None:
+        omni_kwargs["init_timeout"] = args.init_timeout
     if args.cache_backend is not None:
         omni_kwargs["cache_backend"] = args.cache_backend
         omni_kwargs["cache_config"] = cache_config

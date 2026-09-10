@@ -478,6 +478,25 @@ def resolve_quant_config_from_disk(
         )
         return build_quant_config(qc_method, **qc_kwargs)
 
+    # A stale precision on the active config would silently select the wrong GEMM
+    # kernel (for example NVFP4 defaults against an mxfp4 checkpoint), so rebuild
+    # whenever config.json disagrees on a field the active config also carries.
+    for _field in (
+        "precision",
+        "rank",
+        "iterations",
+        "svd_niter",
+        "is_checkpoint_mxfp4_serialized",
+    ):
+        if _field in qc_kwargs and hasattr(quant_config, _field) and getattr(quant_config, _field) != qc_kwargs[_field]:
+            logger.info(
+                "config.json declares %s=%r but the active quant_config has %r; rebuilding quant_config.",
+                _field,
+                qc_kwargs[_field],
+                getattr(quant_config, _field),
+            )
+            return build_quant_config(qc_method, **qc_kwargs)
+
     # AutoRound MXFP checkpoints use data_type="mx_fp" instead of
     # is_checkpoint_*_serialized; rebuild so the offline MXFP4/MXFP8 path is
     # selected according to the checkpoint's bit width.

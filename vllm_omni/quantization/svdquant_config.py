@@ -7,6 +7,11 @@ quantized linear. The four-bit GEMM uses vLLM's existing NVFP4 kernel
 registry, while the rank correction uses ordinary BF16 matrix multiplication.
 Native SVDQuant fusion is a separate optimization and is not required to load
 or run the checkpoint.
+
+An online MXFP4 path that derives everything from BF16 checkpoints, with no
+calibration data and no serialized tensors, lives in ``svdquant_online.py``.
+Select it with ``precision="mxfp4"`` plus
+``is_checkpoint_mxfp4_serialized=false``.
 """
 
 from __future__ import annotations
@@ -96,7 +101,19 @@ def _nvfp4_kernel() -> NvFp4LinearKernel:
 
 
 class DiffusionSVDQuantConfig(QuantizationConfig):
-    """Configuration for serialized NVFP4 W4A4 plus low-rank correction."""
+    """Configuration for W4A4 SVDQuant plus a low-rank correction.
+
+    ``precision="nvfp4"`` loads serialized checkpoints. ``precision="mxfp4"``
+    with ``is_checkpoint_mxfp4_serialized=False`` instead quantizes BF16
+    checkpoints at load time. ``rank=0`` is allowed on that online path only and
+    selects branchless MXFP4, which is the control a rank sweep is read against.
+
+    The online path can also carry each operand in more than one chained FP4 term:
+    ``weight_terms=2`` ships a second FP4 tensor holding what the first weight term
+    left behind, and ``act_terms=2`` re-quantizes the activation residual at run
+    time. Every combination costs one extra W4A4 GEMM per added term and buys back
+    most of the error the single-term group-32 e8m0 scales cannot represent.
+    """
 
     def __init__(
         self,
@@ -104,19 +121,60 @@ class DiffusionSVDQuantConfig(QuantizationConfig):
         precision: str = "nvfp4",
         act_unsigned: bool = False,
         modules_to_not_convert: list[str] | None = None,
+        is_checkpoint_mxfp4_serialized: bool = True,
+        iterations: int = 2,
+        svd_niter: int = 2,
+        weight_terms: int = 1,
+        act_terms: int = 1,
     ) -> None:
         super().__init__()
-        if rank <= 0:
-            raise ValueError(f"SVDQuant rank must be positive, got {rank}")
-        if precision != "nvfp4":
+        if rank < 0:
+            raise ValueError(f"SVDQuant rank must be zero or positive, got {rank}")
+        if rank == 0 and precision == "nvfp4":
             raise ValueError(
-                f"Phase 1 SVDQuant supports serialized NVFP4 checkpoints only; got precision={precision!r}"
+                "A serialized NVFP4 SVDQuant checkpoint has to carry proj_up/proj_down, so the "
+                "branchless rank=0 control is available on the online MXFP4 path only."
             )
+        if precision not in ("nvfp4", "mxfp4"):
+            raise ValueError(
+                "SVDQuant supports precision='nvfp4' (serialized checkpoints) and "
+                f"'mxfp4' (online quantization); got {precision!r}"
+            )
+        if precision == "nvfp4" and not is_checkpoint_mxfp4_serialized:
+            raise ValueError(
+                "NVFP4 SVDQuant requires a serialized checkpoint; vLLM has no dynamic "
+                "NVFP4 quantization. Use precision='mxfp4' to quantize at load time."
+            )
+        if precision == "mxfp4" and is_checkpoint_mxfp4_serialized:
+            raise ValueError(
+                "MXFP4 SVDQuant is online-only: no serialized MXFP4 producer exists. "
+                "Set is_checkpoint_mxfp4_serialized=false."
+            )
+        if iterations < 1:
+            raise ValueError(f"SVDQuant iterations must be >= 1, got {iterations}")
+        if svd_niter < 1:
+            raise ValueError(f"SVDQuant svd_niter must be >= 1, got {svd_niter}")
         if act_unsigned:
-            raise ValueError("Phase 1 SVDQuant does not support unsigned activations")
+            raise ValueError("SVDQuant does not support unsigned activations")
+        for name, terms in (("weight_terms", weight_terms), ("act_terms", act_terms)):
+            if terms not in (1, 2):
+                raise ValueError(f"SVDQuant {name} must be 1 or 2, got {terms}")
+        if (weight_terms > 1 or act_terms > 1) and precision == "nvfp4":
+            raise ValueError(
+                "Chained FP4 terms are an online-quantization feature: a serialized "
+                "checkpoint would have to ship the residual tensors as well."
+            )
         self.rank = rank
         self.precision = precision
+        self.is_checkpoint_mxfp4_serialized = is_checkpoint_mxfp4_serialized
+        self.iterations = iterations
+        self.svd_niter = svd_niter
+        self.weight_terms = weight_terms
+        self.act_terms = act_terms
         self.modules_to_not_convert = modules_to_not_convert or []
+        # Online-quantization load-time statistics.
+        self.online_derive_seconds = 0.0
+        self.online_derived_layers = 0
 
     def __repr__(self) -> str:
         return f"DiffusionSVDQuantConfig(rank={self.rank}, precision={self.precision!r})"
@@ -131,7 +189,9 @@ class DiffusionSVDQuantConfig(QuantizationConfig):
 
     @classmethod
     def get_min_capability(cls) -> int:
-        return 103
+        # NVFP4 is narrowed to SM103 by _assert_supported(); MXFP4 runs on XPU,
+        # where a 103 floor would wrongly reject the device.
+        return 80
 
     @classmethod
     def get_config_filenames(cls) -> list[str]:
@@ -144,6 +204,11 @@ class DiffusionSVDQuantConfig(QuantizationConfig):
             precision=config.get("precision", "nvfp4"),
             act_unsigned=config.get("act_unsigned", False),
             modules_to_not_convert=config.get("modules_to_not_convert"),
+            is_checkpoint_mxfp4_serialized=config.get("is_checkpoint_mxfp4_serialized", True),
+            iterations=config.get("iterations", 2),
+            svd_niter=config.get("svd_niter", 2),
+            weight_terms=config.get("weight_terms", 1),
+            act_terms=config.get("act_terms", 1),
         )
 
     def get_quant_method(
@@ -163,6 +228,10 @@ class DiffusionSVDQuantConfig(QuantizationConfig):
             match_mode="substring",
         ):
             return UnquantizedLinearMethod()
+        if self.precision == "mxfp4" and not self.is_checkpoint_mxfp4_serialized:
+            from vllm_omni.quantization.svdquant_online import SVDQuantOnlineLinearMethod
+
+            return SVDQuantOnlineLinearMethod(self)
         return DiffusionSVDQuantLinearMethod(self)
 
 
