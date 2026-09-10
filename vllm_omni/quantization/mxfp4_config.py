@@ -7,6 +7,10 @@ Architecture mirrors mxfp8_config.py:
   MXFPLinearMethodBase                    – platform-agnostic skeleton (imported from mxfp8_config)
     NPUMxfp4LinearMethod                  – NPU single-scale offline (W4A4 MXFP4)
       NPUMxfp4OnlineLinearMethod          – NPU single-scale online (BF16 → FP4)
+    VllmMxfp4OfflineLinearMethod          – XPU offline (AutoRound MXFP4 checkpoints,
+                                             built directly on XPUMxFp4LinearKernel)
+    VllmMxfp4OnlineLinearMethod           – XPU online (BF16 → FP4 at load time,
+                                             same kernel)
     ROCmMxfp4LinearMethod                 – ROCm base class (AITER quant + shuffle; online-only)
       ROCmMxfp4OnlineLinearMethod         – ROCm online (BF16 → FP4 via AITER)
     NPUMxfp4DualScaleLinearMethod         – NPU dual-scale offline (W4A4 MXFP4 DualScale)
@@ -80,6 +84,7 @@ from vllm_omni.quantization.mxfp8_config import (
     MXFPLinearMethodBase,
     _LazyWeightMixin,
 )
+from vllm_omni.quantization import quant_dump
 
 if TYPE_CHECKING:
     from vllm.model_executor.models.utils import WeightsMapper
@@ -165,9 +170,19 @@ class DiffusionMXFP4Config(QuantizationConfig):
                 if self.is_checkpoint_mxfp4_serialized:
                     raise NotImplementedError("Pre-quantized MXFP4 checkpoints are not yet supported on ROCm.")
                 return ROCmMxfp4OnlineLinearMethod(self)
+            if current_omni_platform.is_xpu():
+                if self.is_checkpoint_mxfp4_serialized:
+                    raise NotImplementedError(
+                        "Pre-quantized MXFP4 checkpoints are not yet supported on XPU. "
+                        "Use AutoRound MXFP4 checkpoints (quant_method='auto-round', "
+                        "data_type='mx_fp', bits=4) or online MXFP4 mode."
+                    )
+                if quant_dump.is_enabled():
+                    layer._quant_dump_prefix = prefix
+                return VllmMxfp4OnlineLinearMethod()
             raise NotImplementedError(
                 "DiffusionMXFP4Config (W4A4 MXFP4) is currently only supported "
-                "on NPU (Ascend) and ROCm (AMD, gfx950) platforms."
+                "on NPU (Ascend), XPU (Intel), and ROCm (AMD, gfx950) platforms."
             )
         return None
 
@@ -964,8 +979,77 @@ class VllmMxfp4OfflineLinearMethod(LinearMethodBase):
         x: torch.Tensor,
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        if x.dim() <= 2:
-            return self.kernel.apply_weights(layer, x, bias)
         ori_shape = x.shape
-        output = self.kernel.apply_weights(layer, x.reshape(-1, ori_shape[-1]), bias)
-        return output.reshape(*ori_shape[:-1], -1)
+        if x.dim() > 2:
+            x = x.reshape(-1, ori_shape[-1])
+        output = self.kernel.apply_weights(layer, x, bias)
+        if quant_dump.is_enabled():
+            quant_dump.record_linear(getattr(layer, "_quant_dump_prefix", ""), x, output, layer)
+        if len(ori_shape) > 2:
+            output = output.reshape(*ori_shape[:-1], -1)
+        return output
+
+
+class VllmMxfp4OnlineLinearMethod(_LazyWeightMixin, VllmMxfp4OfflineLinearMethod):
+    """Online MXFP4 linear method: BF16 checkpoint, quantized at load time.
+
+    create_weights comes from :class:`_LazyWeightMixin` (meta device, weights
+    materialised just-in-time); apply() is shared with the offline method, so
+    activation quantization and the fp4_gemm dispatch live in the kernel.
+    """
+
+    def create_weights(
+        self,
+        layer: torch.nn.Module,
+        input_size_per_partition: int,
+        output_partition_sizes: list[int],
+        input_size: int,
+        output_size: int,
+        params_dtype: torch.dtype,
+        **extra_weight_attrs,
+    ) -> None:
+        if input_size_per_partition % self.group_size != 0:
+            raise ValueError(
+                f"MXFP4 requires input_size_per_partition ({input_size_per_partition}) "
+                f"to be divisible by {self.group_size}."
+            )
+        super().create_weights(
+            layer,
+            input_size_per_partition,
+            output_partition_sizes,
+            input_size,
+            output_size,
+            params_dtype,
+            **extra_weight_attrs,
+        )
+
+    def process_weights_after_loading(self, layer: Module) -> None:
+        if getattr(layer, "_already_called_process_weights_after_loading", False):
+            return
+
+        if layer.weight.device == torch.device("meta"):
+            weight = ModelWeightParameter(
+                data=torch.empty_like(layer.weight, device=layer._load_device),
+                input_dim=1,
+                output_dim=0,
+                weight_loader=layer.weight.weight_loader,
+            )
+            _copy_missing_attrs(layer.weight, weight)
+            layer.register_parameter("weight", weight)
+            initialize_single_dummy_weight(layer.weight)
+
+        if quant_dump.is_enabled():
+            layer.weight_bf16 = layer.weight.data.detach().clone()
+
+        # Importing the XPU ops module registers torch.ops.vllm.xpu_mxfp4_quantize.
+        import vllm._xpu_ops  # noqa: F401
+        from vllm.model_executor.layers.quantization.utils.mxfp4_utils import (
+            xpu_mxfp4_quantize,
+        )
+
+        weight_fp4, weight_scale = xpu_mxfp4_quantize(layer.weight.data.contiguous())
+        replace_parameter(layer, "weight", weight_fp4)
+        replace_parameter(layer, "weight_scale", weight_scale)
+
+        self.kernel.process_weights_after_loading(layer)
+        layer._already_called_process_weights_after_loading = True
