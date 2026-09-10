@@ -12,6 +12,7 @@ from vllm_omni.diffusion.attention.backends.abstract import (
     AttentionMetadata,
 )
 from vllm_omni.diffusion.attention.backends.utils.attn_runtime_selector import can_sdpa_use_fused_gqa
+from vllm_omni.quantization import quant_dump
 
 logger = init_logger(__name__)
 
@@ -86,6 +87,7 @@ class SDPAImpl(AttentionImpl):
     ) -> None:
         self.causal = causal
         self.softmax_scale = softmax_scale
+        self._dump_prefix = prefix
         if backend_kwargs:
             logger.warning("SDPAImpl ignoring backend_kwargs: %s", list(backend_kwargs.keys()))
 
@@ -131,6 +133,8 @@ class SDPAImpl(AttentionImpl):
             scale=self.softmax_scale,
             enable_gqa=enable_gqa,
         )
+        if quant_dump.is_enabled():
+            quant_dump.record_sdpa_stats(self._dump_prefix, query, key, value, output)
         out = output.permute(0, 2, 1, 3)
         return out
 

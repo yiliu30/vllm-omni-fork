@@ -14,6 +14,7 @@ from vllm_omni.diffusion.attention.backends.abstract import (
     AttentionMetadata,
 )
 from vllm_omni.platforms import current_omni_platform
+from vllm_omni.quantization import quant_dump
 
 logger = init_logger(__name__)
 
@@ -199,6 +200,7 @@ class SageAttention3Impl(AttentionImpl):
         self.softmax_scale = softmax_scale
         self.dropout = extra_impl_args.get("dropout_p", 0.0)
         self.layer_idx = _try_extract_layer_index(prefix)
+        self._dump_prefix = prefix
 
     def forward_cuda(
         self,
@@ -259,6 +261,8 @@ class SageAttention3Impl(AttentionImpl):
             key_hnd = key_hnd.to(torch.bfloat16)
             value_hnd = value_hnd.to(torch.bfloat16)
 
+        _dump_kind: str | None = None
+
         def sdpa_fallback() -> torch.Tensor:
             output = F.scaled_dot_product_attention(
                 query_hnd,
@@ -269,17 +273,29 @@ class SageAttention3Impl(AttentionImpl):
                 scale=self.softmax_scale,
                 enable_gqa=heads_q != heads_kv,
             )
+            if quant_dump.is_enabled() and _dump_kind is not None:
+                quant_dump.record_attn(
+                    self._dump_prefix,
+                    query_hnd,
+                    key_hnd,
+                    value_hnd,
+                    output,
+                    kind=_dump_kind,
+                    softmax_scale=self.softmax_scale,
+                )
             return output.transpose(1, 2).contiguous().to(orig_dtype)
 
         # Cross-attention (e.g. text conditioning) has mismatched sequence
         # lengths; the V3 Hybrid kernel is self-attention only, so SDPA by design.
         if seq_q != seq_kv:
             _sage_attn3_record("cross_sdpa")
+            _dump_kind = "cross"
             return sdpa_fallback()
 
         # First-class selective fallback: per-layer forced SDPA.
         if self.layer_idx is not None and self.layer_idx in _SAGE_ATTN3_FORCE_SDPA_BLOCKS:
             _sage_attn3_record("forced_sdpa")
+            _dump_kind = "forced"
             return sdpa_fallback()
 
         # Kernel contract: batch=1, Hq == Hkv, head_dim == 128, non-causal.
@@ -296,6 +312,7 @@ class SageAttention3Impl(AttentionImpl):
                 "falling back to torch SDPA.",
             )
             _sage_attn3_record("sdpa_fallback")
+            _dump_kind = "fallback"
             return sdpa_fallback()
 
         if not _xpu_v3_hybrid_kernel_ready():
@@ -306,6 +323,7 @@ class SageAttention3Impl(AttentionImpl):
                 "enabled. Falling back to torch SDPA.",
             )
             _sage_attn3_record("sdpa_fallback")
+            _dump_kind = "fallback"
             return sdpa_fallback()
 
         try:
@@ -319,6 +337,7 @@ class SageAttention3Impl(AttentionImpl):
                     "falling back to torch SDPA.",
                 )
                 _sage_attn3_record("sdpa_fallback")
+                _dump_kind = "fallback"
                 return sdpa_fallback()
             raise
 
@@ -329,7 +348,18 @@ class SageAttention3Impl(AttentionImpl):
                 "re-running with torch SDPA for this call.",
             )
             _sage_attn3_record("nonfinite_sdpa")
+            _dump_kind = "fallback"
             return sdpa_fallback()
 
+        if quant_dump.is_enabled():
+            quant_dump.record_attn(
+                self._dump_prefix,
+                query_hnd,
+                key_hnd,
+                value_hnd,
+                output,
+                kind="self",
+                softmax_scale=self.softmax_scale,
+            )
         _sage_attn3_record("sage")
         return output.transpose(1, 2).contiguous().to(orig_dtype)

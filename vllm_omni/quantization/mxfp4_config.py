@@ -1039,7 +1039,7 @@ class VllmMxfp4OnlineLinearMethod(_LazyWeightMixin, VllmMxfp4OfflineLinearMethod
             initialize_single_dummy_weight(layer.weight)
 
         if quant_dump.is_enabled():
-            layer.weight_bf16 = layer.weight.data.detach().clone()
+            layer.weight_bf16 = layer.weight.data.detach().clone().cpu()
 
         # Importing the XPU ops module registers torch.ops.vllm.xpu_mxfp4_quantize.
         import vllm._xpu_ops  # noqa: F401

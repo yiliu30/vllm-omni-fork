@@ -67,6 +67,7 @@ from vllm.model_executor.parameter import ModelWeightParameter
 from vllm.model_executor.utils import replace_parameter, set_weight_attrs
 
 from vllm_omni.platforms import current_omni_platform
+from vllm_omni.quantization import quant_dump
 from vllm_omni.quantization._copy_missing_attrs import (
     copy_missing_attrs as _copy_missing_attrs,
 )
@@ -173,6 +174,8 @@ class DiffusionMXFP8Config(QuantizationConfig):
             if current_omni_platform.is_xpu():
                 if self.is_checkpoint_mxfp8_serialized:
                     raise NotImplementedError(self._XPU_OFFLINE_UNSUPPORTED)
+                if quant_dump.is_enabled():
+                    layer._quant_dump_prefix = prefix
                 return VllmMxfp8OnlineLinearMethod()
             raise NotImplementedError(
                 "DiffusionMXFP8Config (W8A8 MXFP8) is currently only supported "
@@ -609,11 +612,15 @@ class VllmMxfp8OfflineLinearMethod(LinearMethodBase):
         x: torch.Tensor,
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        if x.dim() <= 2:
-            return self.kernel.apply_weights(layer, x, bias)
         ori_shape = x.shape
-        output = self.kernel.apply_weights(layer, x.reshape(-1, ori_shape[-1]), bias)
-        return output.reshape(*ori_shape[:-1], -1)
+        if x.dim() > 2:
+            x = x.reshape(-1, ori_shape[-1])
+        output = self.kernel.apply_weights(layer, x, bias)
+        if quant_dump.is_enabled():
+            quant_dump.record_linear(getattr(layer, "_quant_dump_prefix", ""), x, output, layer)
+        if len(ori_shape) > 2:
+            output = output.reshape(*ori_shape[:-1], -1)
+        return output
 
 
 class VllmMxfp8OnlineLinearMethod(_LazyWeightMixin, VllmMxfp8OfflineLinearMethod):
@@ -637,6 +644,9 @@ class VllmMxfp8OnlineLinearMethod(_LazyWeightMixin, VllmMxfp8OfflineLinearMethod
             _copy_missing_attrs(layer.weight, weight)
             layer.register_parameter("weight", weight)
             initialize_single_dummy_weight(layer.weight)
+
+        if quant_dump.is_enabled():
+            layer.weight_bf16 = layer.weight.data.detach().clone().cpu()
 
         weight_fp8, weight_scale = mxfp8_e4m3_quantize(layer.weight.data.contiguous())
         replace_parameter(layer, "weight", weight_fp8)
