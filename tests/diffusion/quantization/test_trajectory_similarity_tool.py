@@ -13,6 +13,8 @@ from PIL import Image
 from vllm_omni.quantization.tools.compare_diffusion_trajectory_similarity import (
     VariantRun,
     _build_variant_config,
+    _expand_frame_container,
+    _get_output_frames,
     _request_peak_memory_mb,
     _run_summary,
     compute_tensor_metrics,
@@ -55,6 +57,52 @@ def test_summarize_output_image_metrics_stacks_pil_images():
     assert summary["num_images"] == 1
     assert summary["image0_metrics"]["mae"] == 1.0
     assert summary["all_images_metrics"]["mse"] == 1.0
+
+
+@pytest.mark.parametrize(
+    ("stacked", "expected_frames"),
+    [
+        ((3, 3, 4, 6), 3),  # video tensor with a frame dimension first
+        ((1, 3, 3, 4, 6), 3),  # and with a leading batch dimension
+    ],
+)
+def test_video_tensor_frames_become_pil_frames(stacked, expected_frames):
+    """Wan-style video results are one stacked tensor, not a list of PIL images."""
+    # Channels-first with a spatial extent above the channel count, as real frames have.
+    values = torch.tensor([-1.0, 0.2, 1.0]).view(3, 1, 1, 1).expand(3, 3, 4, 6)
+    result = SimpleNamespace(images=[values.reshape(stacked)])
+
+    frames = _get_output_frames(result)
+
+    assert len(frames) == expected_frames
+    assert [frame.size for frame in frames] == [(6, 4)] * expected_frames
+    # auto range maps [-1, 1] onto uint8; the mid frame is not near either end.
+    assert [np.asarray(frame).mean() for frame in frames] == [0.0, 153.0, 255.0]
+
+
+def test_frame_container_handles_audio_pair_and_dict():
+    frames_tensor = torch.zeros(2, 3, 4, 4)
+    audio = torch.zeros(8)
+
+    assert len(_expand_frame_container([{"frames": frames_tensor, "audio": audio}])) == 2
+    assert len(_expand_frame_container([(frames_tensor, audio)])) == 2
+    assert len(_expand_frame_container([[Image.new("RGB", (2, 2))]])) == 1
+
+
+def test_positive_tensors_are_not_rescaled_and_uint8_passes_through():
+    positive = torch.full((1, 3, 2, 2), 0.25)
+    assert np.asarray(_get_output_frames(SimpleNamespace(images=[positive]))[0]).mean() == 64.0
+
+    raw = np.full((2, 2, 3), 200, dtype=np.uint8)
+    converted = _get_output_frames(SimpleNamespace(images=[raw]))[0]
+    assert np.asarray(converted).mean() == 200.0
+
+    # Metrics only accept PIL frames, which is what the conversion guarantees.
+    summary = summarize_output_image_metrics(
+        _get_output_frames(SimpleNamespace(images=[positive])),
+        _get_output_frames(SimpleNamespace(images=[positive])),
+    )
+    assert summary["all_frames_metrics"]["psnr_db"] == float("inf")
 
 
 def test_run_summary_reports_worker_peak_memory():

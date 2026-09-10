@@ -330,6 +330,9 @@ def _build_omni_kwargs(args: argparse.Namespace, config: VariantConfig) -> dict[
         "vae_use_tiling": args.vae_use_tiling,
         "step_execution": args.step_execution if args.task == "t2i" else False,
         "diffusion_load_format": config.diffusion_load_format,
+        # Online quantization (for example SVDQuant MXFP4) derives weights during
+        # loading, which can push model setup well past the engine default.
+        "init_timeout": args.init_timeout,
     }
     if args.model_class_name:
         kwargs["model_class_name"] = args.model_class_name
@@ -420,15 +423,102 @@ def _run_variant(args: argparse.Namespace, config: VariantConfig) -> VariantRun:
     )
 
 
-def _get_output_frames(result: Any) -> list[Any]:
-    images = list(getattr(result, "images", []) or [])
-    if len(images) == 1 and isinstance(images[0], list):
-        return list(images[0])
-    return images
+def _expand_frame_container(images: list[Any]) -> list[Any]:
+    """Unwrap the containers a pipeline may deliver frames in.
+
+    Video results arrive either as a list of frames or as one stacked tensor with
+    a batch or frame dimension on the front, and some pipelines pair the frames
+    with audio in a tuple or dict. Image results are already one item per image.
+    """
+    if len(images) != 1:
+        return images
+    inner = images[0]
+    if isinstance(inner, dict):
+        # ``or`` would ask a tensor for its truth value.
+        inner = next((inner[key] for key in ("frames", "video") if key in inner), None)
+    elif isinstance(inner, tuple) and len(inner) == 2:
+        inner = inner[0]
+    if isinstance(inner, (list, tuple)):
+        return list(inner)
+    if isinstance(inner, (torch.Tensor, np.ndarray)):
+        if inner.ndim >= 5:
+            return list(inner[0])
+        if inner.ndim == 4:
+            return list(inner)
+    return [inner] if inner is not None else []
 
 
-def _save_outputs(result: Any, output_dir: Path, label: str, task: str, fps: int) -> list[str]:
-    frames = _get_output_frames(result)
+def _clip_min(frames: list[Any]) -> float | None:
+    """Lowest value across every raw numeric frame, or None if there are none.
+
+    The value range must be decided for the whole clip: one bright frame of a
+    ``[-1, 1]`` video is entirely positive, and deciding per frame would map its
+    neighbours onto a different scale.
+    """
+    low: float | None = None
+    for frame in frames:
+        if isinstance(frame, torch.Tensor) and frame.is_floating_point():
+            value = float(frame.min())
+        elif isinstance(frame, np.ndarray) and np.issubdtype(frame.dtype, np.floating):
+            value = float(frame.min())
+        else:
+            continue
+        low = value if low is None else min(low, value)
+    return low
+
+
+def _frame_to_pil(frame: Any, tensor_range: str) -> object:
+    """Convert one frame of any supported layout to a uint8 RGB PIL image."""
+    from PIL import Image
+
+    if isinstance(frame, Image.Image):
+        return frame.convert("RGB")
+
+    if isinstance(frame, torch.Tensor):
+        array = frame.detach().cpu().numpy()
+    elif isinstance(frame, np.ndarray):
+        array = frame
+    else:
+        raise TypeError(f"Unsupported frame type {type(frame).__name__}")
+
+    if array.ndim == 4 and array.shape[0] == 1:
+        array = array[0]
+    # Channels-last is what PIL wants; a trailing spatial dimension means the
+    # frame is channels-first.
+    if array.ndim == 3 and array.shape[0] in (1, 2, 3, 4) and array.shape[-1] not in (1, 2, 3, 4):
+        array = np.transpose(array, (1, 2, 0))
+    if array.ndim == 2:
+        array = array[:, :, None]
+
+    if np.issubdtype(array.dtype, np.integer):
+        array = array.astype(np.float32) / 255.0
+    else:
+        array = array.astype(np.float32)
+        if tensor_range == "negative_one_to_one":
+            array = np.clip(array, -1.0, 1.0) * 0.5 + 0.5
+        else:
+            array = np.clip(array, 0.0, 1.0)
+
+    if array.shape[2] == 1:
+        array = np.repeat(array, 3, axis=2)
+    elif array.shape[2] == 4:
+        array = array[:, :, :3]
+    return Image.fromarray(np.rint(np.clip(array, 0.0, 1.0) * 255.0).astype(np.uint8))
+
+
+def _get_output_frames(result: Any, tensor_range: str = "auto") -> list[Any]:
+    """Return the request output as PIL frames, the only shape metrics/savers assume."""
+    frames = _expand_frame_container(list(getattr(result, "images", []) or []))
+    if tensor_range == "auto":
+        low = _clip_min(frames)
+        tensor_range = "negative_one_to_one" if low is not None and low < -0.01 else "zero_to_one"
+    return [_frame_to_pil(frame, tensor_range) for frame in frames]
+
+
+def _save_outputs(
+    result: Any, output_dir: Path, label: str, task: str, fps: int, tensor_range: str = "auto"
+) -> list[str]:
+    frames = _get_output_frames(result, tensor_range)
     saved: list[str] = []
     if not frames:
         return saved
@@ -484,8 +574,12 @@ def run_comparison(args: argparse.Namespace) -> dict[str, Any]:
     save_output_paths: dict[str, list[str]] = {}
     if args.save_output_dir:
         save_dir = Path(args.save_output_dir).expanduser().resolve()
-        save_output_paths["reference"] = _save_outputs(reference_run.result, save_dir, "reference", args.task, args.fps)
-        save_output_paths["candidate"] = _save_outputs(candidate_run.result, save_dir, "candidate", args.task, args.fps)
+        save_output_paths["reference"] = _save_outputs(
+            reference_run.result, save_dir, "reference", args.task, args.fps, args.output_tensor_range
+        )
+        save_output_paths["candidate"] = _save_outputs(
+            candidate_run.result, save_dir, "candidate", args.task, args.fps, args.output_tensor_range
+        )
 
     result = {
         "model": args.model,
@@ -515,8 +609,8 @@ def run_comparison(args: argparse.Namespace) -> dict[str, Any]:
         "reference_generation": _run_summary(reference_run),
         "candidate_generation": _run_summary(candidate_run),
         "output_metrics": summarize_output_image_metrics(
-            _get_output_frames(reference_run.result),
-            _get_output_frames(candidate_run.result),
+            _get_output_frames(reference_run.result, args.output_tensor_range),
+            _get_output_frames(candidate_run.result, args.output_tensor_range),
         ),
     }
     if save_output_paths:
@@ -565,6 +659,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--guidance-scale-2", type=float)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--warmup-runs", type=int, default=0)
+    parser.add_argument(
+        "--output-tensor-range",
+        choices=["auto", "negative_one_to_one", "zero_to_one"],
+        default="auto",
+        help="Value range of raw tensor frames returned by the pipeline. 'auto' infers "
+        "it from the data, which is correct unless a variant is so broken it stays positive.",
+    )
+    parser.add_argument(
+        "--init-timeout",
+        type=int,
+        default=600,
+        help="Seconds to wait for each engine to finish loading. Online quantization "
+        "that derives weights at load time needs more than the 600s default.",
+    )
     parser.add_argument("--measure-runs", type=int, default=1)
     parser.add_argument("--ulysses-degree", type=int, default=1)
     parser.add_argument("--ring-degree", type=int, default=1)
