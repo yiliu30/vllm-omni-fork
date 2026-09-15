@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import builtins
 import importlib
 import sys
 import types
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -16,11 +18,78 @@ SAGE_ATTN3_MODULE = "vllm_omni.diffusion.attention.backends.sage_attn3"
 
 
 def load_sage_attn3_module(monkeypatch: pytest.MonkeyPatch, kernel_impl):
+    import vllm_omni.platforms as platforms
+
     fake_module = types.ModuleType("sageattn3")
     fake_module.sageattn3_blackwell = kernel_impl
+    monkeypatch.setattr(platforms.current_omni_platform, "is_xpu", lambda: False)
     monkeypatch.setitem(sys.modules, "sageattn3", fake_module)
     sys.modules.pop(SAGE_ATTN3_MODULE, None)
     return importlib.import_module(SAGE_ATTN3_MODULE)
+
+
+def test_xpu_import_selects_deepklox_without_importing_cuda_sageattn3(monkeypatch: pytest.MonkeyPatch):
+    import vllm_omni.platforms as platforms
+
+    calls = {}
+
+    def fake_kernel(query, key, value, tensor_layout):
+        calls["tensor_layout"] = tensor_layout
+        return query
+
+    deepklox_module = types.ModuleType("deepklox")
+    deepklox_module.__path__ = []
+    interface_module = types.ModuleType("deepklox.sageattn_interface")
+    interface_module.sageattn_v3_hybrid = fake_kernel
+    original_import = builtins.__import__
+
+    def guarded_import(name, *args, **kwargs):
+        if name == "sageattn3":
+            raise AssertionError("XPU must not import the CUDA sageattn3 package")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(platforms.current_omni_platform, "is_xpu", lambda: True)
+    monkeypatch.setitem(sys.modules, "deepklox", deepklox_module)
+    monkeypatch.setitem(sys.modules, "deepklox.sageattn_interface", interface_module)
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    sys.modules.pop(SAGE_ATTN3_MODULE, None)
+
+    backend_module = importlib.import_module(SAGE_ATTN3_MODULE)
+    query = torch.randn(1, 2, 1, 128)
+
+    assert backend_module._xpu_v3_hybrid_kernel_call(query, query, query) is query
+    assert calls["tensor_layout"] == "NHD"
+
+
+def test_xpu_import_warns_when_deepklox_is_unavailable(monkeypatch: pytest.MonkeyPatch):
+    import vllm.logger as vllm_logger
+    import vllm_omni.platforms as platforms
+
+    logger = Mock()
+    original_import = builtins.__import__
+
+    def guarded_import(name, *args, **kwargs):
+        if name == "deepklox.sageattn_interface":
+            raise ImportError("deepklox is unavailable")
+        if name == "sageattn3":
+            raise AssertionError("XPU must not import the CUDA sageattn3 package")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(platforms.current_omni_platform, "is_xpu", lambda: True)
+    monkeypatch.setattr(vllm_logger, "init_logger", lambda _: logger)
+    monkeypatch.delitem(sys.modules, "deepklox.sageattn_interface", raising=False)
+    monkeypatch.delitem(sys.modules, "deepklox", raising=False)
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    sys.modules.pop(SAGE_ATTN3_MODULE, None)
+
+    backend_module = importlib.import_module(SAGE_ATTN3_MODULE)
+
+    assert backend_module._xpu_v3_hybrid_kernel_ready() is False
+    logger.warning.assert_called_once_with(
+        "DeepKLOX SageAttention V3 Hybrid is not available on XPU; "
+        "SAGE_ATTN_3 will fall back to flash attention. Install `deepklox` "
+        "with SageAttention V3 support."
+    )
 
 
 def test_sage_attn3_forward_uses_blackwell_layout(monkeypatch: pytest.MonkeyPatch):

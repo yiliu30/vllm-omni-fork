@@ -41,6 +41,7 @@ Extending to a new MX precision with a different calling convention (e.g. dual-s
 
 from __future__ import annotations
 
+import os
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
@@ -537,6 +538,80 @@ except ImportError as e:
     ) from e
 
 
+def _repack_weight_ab(layer: Module) -> None:
+    """Repack an MXFP8 weight so the GEMM's B operand is physically contiguous.
+
+    ``fp8_gemm`` consumes B as ``[K, N]``. By default that is a transposed *view*
+    of an ``[N, K]`` buffer, so B is K-contiguous -- oneDNN's "ba" layout. Making
+    it N-contiguous ("ab") is worth 2.5x on every linear in a
+    ``WanTransformerBlock`` at the 720p shape: measured at 75600 tokens, the four
+    shapes go 199.1 -> 79.6 ms in total, which turns MXFP8 from 1.34x slower than
+    bf16 into 1.86x faster. The repack is a one-off load-time copy; the GEMM path
+    is untouched.
+
+    Done here rather than via vLLM's ``VLLM_XPU_FORCE_AB_LAYOUT_WEIGHT`` because
+    that env is global -- it also repacks unquantized bf16 weights -- and it only
+    exists in newer vLLM. This keeps the change scoped to MXFP8 and works against
+    either vLLM.
+
+    Which tensor is B differs by vLLM version, and the weight's own shape cannot
+    settle it -- for a square linear (Wan's 5120x5120 attention projections) both
+    orientations are ``[5120, 5120]``. The *scale* is unambiguous, because
+    ``K//32`` is never equal to ``N`` for any real layer:
+
+      * scale ``[N, K//32]``  -> newer vLLM: ``weight`` is ``[N, K]`` and
+        ``apply_weights`` transposes, so B is ``weight.t()`` and we want
+        ``weight.stride(0) == 1`` (via ``.t().contiguous().t()``)
+      * scale ``[K//32, N]``  -> older vLLM: ``weight`` was already transposed to
+        ``[K, N]`` and is passed straight through, so B is ``weight`` and we just
+        want it contiguous
+
+    Both forms are written as an idempotent "is B already contiguous?" check, so
+    running this after a vLLM that already repacked (its own
+    ``VLLM_XPU_FORCE_AB_LAYOUT_WEIGHT``) is a no-op rather than an undo.
+
+    Set ``VLLM_XPU_FORCE_AB_LAYOUT_WEIGHT=0`` to skip this. The only reason to do
+    so is bitwise reproducibility: oneDNN's ab-weights matmul is not
+    reproducible run to run. For diffusion that is usually moot, since the
+    pipeline already has an ~18 dB PSNR nondeterminism floor between identical
+    seeded runs, but it matters when bisecting numerics.
+    """
+    if os.environ.get("VLLM_XPU_FORCE_AB_LAYOUT_WEIGHT", "1") == "0":
+        return
+    weight = getattr(layer, "weight", None)
+    scale = getattr(layer, "weight_scale", None)
+    if weight is None or scale is None or weight.dim() != 2 or scale.dim() != 2:
+        return
+
+    k = getattr(layer, "input_size_per_partition", None)
+    n = getattr(layer, "output_size_per_partition", None)
+    if k is None or n is None or k % MXFP8_BLOCK_SIZE != 0:
+        return
+    k_blocks = k // MXFP8_BLOCK_SIZE
+    if k_blocks == n:
+        return  # degenerate: scale orientation would be ambiguous too
+
+    scale_shape = tuple(scale.shape)
+    if scale_shape == (n, k_blocks):
+        # B is weight.t(); B contiguous <=> weight.stride(0) == 1.
+        if weight.data.stride(0) != 1:
+            layer.weight.data = weight.data.t().contiguous().t()
+    elif scale_shape == (k_blocks, n):
+        # B is weight itself.
+        if not weight.data.is_contiguous():
+            layer.weight.data = weight.data.contiguous()
+    else:
+        # Fused/sharded layouts we do not recognise: leave alone rather than
+        # guess, since a wrong repack silently corrupts the GEMM.
+        logger.warning_once(
+            "MXFP8 ab-layout repack skipped: weight_scale shape %s matches "
+            "neither (N,K//32)=%s nor (K//32,N)=%s",
+            scale_shape,
+            (n, k_blocks),
+            (k_blocks, n),
+        )
+
+
 class VllmMxfp8OfflineLinearMethod(LinearMethodBase):
     """Offline MXFP8 linear method for AutoRound checkpoints (data_type="mx_fp").
 
@@ -602,6 +677,7 @@ class VllmMxfp8OfflineLinearMethod(LinearMethodBase):
         # Hands the [N, K//32] e8m0 scale to the kernel for its [K//32, N]
         # relayout, which apply_weights() then recovers with a free .t().
         self.kernel.process_weights_after_loading(layer)
+        _repack_weight_ab(layer)
 
     def apply(
         self,
@@ -643,4 +719,5 @@ class VllmMxfp8OnlineLinearMethod(_LazyWeightMixin, VllmMxfp8OfflineLinearMethod
         replace_parameter(layer, "weight_scale", weight_scale)
 
         self.kernel.process_weights_after_loading(layer)
+        _repack_weight_ab(layer)
         layer._already_called_process_weights_after_loading = True

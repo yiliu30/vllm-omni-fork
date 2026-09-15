@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import atexit
+import os
+
 import torch
 import torch.nn.functional as F
 from vllm.logger import init_logger
@@ -10,42 +13,227 @@ from vllm_omni.diffusion.attention.backends.abstract import (
     AttentionImpl,
     AttentionMetadata,
 )
+from vllm_omni.platforms import current_omni_platform
 
 logger = init_logger(__name__)
 
-try:
-    from sageattn3 import sageattn3_blackwell  # noqa: F401
-except ImportError:
-    logger.warning(
-        "SageAttention3Backend is not available. Install `sageattn3` from "
-        "https://github.com/thu-ml/SageAttention/tree/main/sageattention3_blackwell"
+if current_omni_platform.is_xpu():
+    try:
+        from deepklox.sageattn_interface import sageattn_v3_hybrid
+    except ImportError:
+        sageattn_v3_hybrid = None
+        logger.warning(
+            "DeepKLOX SageAttention V3 Hybrid is not available on XPU; "
+            "SAGE_ATTN_3 will fall back to flash attention. Install `deepklox` "
+            "with SageAttention V3 support."
+        )
+else:
+    try:
+        from sageattn3 import sageattn3_blackwell  # noqa: F401
+    except ImportError:
+        logger.warning(
+            "SageAttention3Backend is not available. Install `sageattn3` from "
+            "https://github.com/thu-ml/SageAttention/tree/main/sageattention3_blackwell"
+        )
+        raise ImportError
+
+_SAGE_ATTN3_FORCE_SDPA_BLOCKS = frozenset(
+    int(block)
+    for block in os.environ.get("SAGE_ATTN_FORCE_SDPA_BLOCKS", "").split(",")
+    if block.strip()
+)
+_SAGE_ATTN3_REPORT_FALLBACKS = os.environ.get("SAGE_ATTN_REPORT_FALLBACKS", "0") == "1"
+_SAGE_ATTN3_DEBUG_CHECK_FINITE = os.environ.get("SAGE_ATTN_DEBUG_CHECK_FINITE", "0") == "1"
+# Which implementation serves the calls the V3 kernel declines: "flash" (the default,
+# and the reason _make_xpu_flash_fallback exists) or "sdpa", which restores the original
+# torch.nn.functional.scaled_dot_product_attention path. Only "sdpa" is a behaviour
+# change; it exists to measure what the flash fallback buys, since the two differ on
+# every forced block, every cross-attention call and every contract rejection.
+#
+# Deliberately fatal on an unrecognised value rather than defaulting to flash: the whole
+# point of the knob is attributing a timing to one of the two paths, and a typo that
+# silently produced flash numbers under an sdpa label would be worse than not starting.
+_SAGE_ATTN3_FALLBACK = os.environ.get("SAGE_ATTN_FALLBACK", "flash").strip().lower() or "flash"
+if _SAGE_ATTN3_FALLBACK not in ("flash", "sdpa"):
+    raise ValueError(
+        f"SAGE_ATTN_FALLBACK must be 'flash' or 'sdpa', got {_SAGE_ATTN3_FALLBACK!r}"
     )
-    raise ImportError
+
+if current_omni_platform.is_xpu():
+    if _SAGE_ATTN3_REPORT_FALLBACKS:
+        logger.info("SageAttention3 XPU fallback reporting is enabled.")
+    logger.info(
+        "SageAttention3 XPU fallback implementation: %s (SAGE_ATTN_FALLBACK)",
+        _SAGE_ATTN3_FALLBACK,
+    )
+    if _SAGE_ATTN3_FORCE_SDPA_BLOCKS:
+        # The env var keeps its published name, but the path it selects is whatever
+        # SAGE_ATTN_FALLBACK picks -- flash by default, because SDPA at these sequence
+        # lengths costs 5.3x the sage kernel per call.
+        logger.info(
+            "SageAttention3 XPU forcing the %s fallback for transformer blocks: %s",
+            _SAGE_ATTN3_FALLBACK,
+            sorted(_SAGE_ATTN3_FORCE_SDPA_BLOCKS),
+        )
+
+_V3_HYBRID_HEAD_SIZE = 128
+_V3_HYBRID_BATCH = 1
+
+_sage_attn3_call_counts = {
+    # Why a call did not reach the V3 kernel.
+    "sage": 0,
+    "forced_sdpa": 0,
+    "cross_sdpa": 0,
+    "sdpa_fallback": 0,
+    "nonfinite_sdpa": 0,
+    # Which reference implementation served those calls. The four keys above keep
+    # their historical names -- they answer "which branch declined the kernel", not
+    # "what ran" -- so existing log parsers keep working now that the reference path
+    # is flash attention rather than torch SDPA.
+    "fallback_flash": 0,
+    "fallback_sdpa": 0,
+}
 
 
-# Wrapping sageattn3_blackwell as a torch.library custom op keeps it opaque to
-# torch.compile. Otherwise Dynamo graph-breaks on the raw pybind11 kernel and
-# Inductor fails scheduling with KeyError: 'op5'. The hasattr guard keeps this
-# idempotent across test re-imports that pop the module from sys.modules.
-if not hasattr(torch.ops.vllm_omni, "sageattn3_blackwell"):
-
-    @torch.library.custom_op("vllm_omni::sageattn3_blackwell", mutates_args=())
-    def _sageattn3_blackwell_op(
-        query: torch.Tensor,
-        key: torch.Tensor,
-        value: torch.Tensor,
-        is_causal: bool,
-    ) -> torch.Tensor:
-        from sageattn3 import sageattn3_blackwell as _kernel
-
-        return _kernel(query, key, value, is_causal=is_causal)
-
-    @_sageattn3_blackwell_op.register_fake
-    def _(query, key, value, is_causal):
-        return torch.empty_like(query)
+def get_sage_attn3_call_counts() -> dict[str, int]:
+    """Snapshot of the SAGE_ATTN_3 XPU dispatch counters."""
+    return dict(_sage_attn3_call_counts)
 
 
-_sageattn3_blackwell_op = torch.ops.vllm_omni.sageattn3_blackwell
+def reset_sage_attn3_call_counts() -> None:
+    for key in _sage_attn3_call_counts:
+        _sage_attn3_call_counts[key] = 0
+
+
+def _sage_attn3_record(kind: str) -> None:
+    if _SAGE_ATTN3_REPORT_FALLBACKS:
+        _sage_attn3_call_counts[kind] += 1
+
+
+def _sage_attn3_report_call_counts() -> None:
+    if _SAGE_ATTN3_REPORT_FALLBACKS:
+        print(
+            "Sage attention V3 call counts: "
+            f"sage={_sage_attn3_call_counts['sage']}, "
+            f"forced_sdpa={_sage_attn3_call_counts['forced_sdpa']}, "
+            f"cross_sdpa={_sage_attn3_call_counts['cross_sdpa']}, "
+            f"sdpa_fallback={_sage_attn3_call_counts['sdpa_fallback']}, "
+            f"nonfinite_sdpa={_sage_attn3_call_counts['nonfinite_sdpa']}, "
+            f"fallback_flash={_sage_attn3_call_counts['fallback_flash']}, "
+            f"fallback_sdpa={_sage_attn3_call_counts['fallback_sdpa']}"
+        )
+
+
+atexit.register(_sage_attn3_report_call_counts)
+
+
+def _try_extract_layer_index(prefix: str) -> int | None:
+    if not prefix:
+        return None
+    try:
+        from vllm.model_executor.models.utils import extract_layer_index
+
+        return extract_layer_index(prefix)
+    except (AssertionError, ValueError, ImportError):
+        return None
+
+
+_xpu_v3_hybrid_available = current_omni_platform.is_xpu() and sageattn_v3_hybrid is not None
+_xpu_warned_once: dict[str, bool] = {}
+
+
+def _xpu_v3_hybrid_kernel_ready() -> bool:
+    """Report whether the platform-selected DeepKLOX kernel is available."""
+    return _xpu_v3_hybrid_available
+
+
+def _xpu_v3_hybrid_unsupported(error: RuntimeError) -> bool:
+    message = str(error).lower()
+    return "cri" in message or "xe3p" in message or "without the sageattention v3 hybrid" in message
+
+
+def _xpu_warn_once(key: str, message: str) -> None:
+    if not _xpu_warned_once.get(key):
+        logger.warning(message)
+        _xpu_warned_once[key] = True
+
+
+if not current_omni_platform.is_xpu():
+    # Wrapping sageattn3_blackwell as a torch.library custom op keeps it opaque to
+    # torch.compile. Otherwise Dynamo graph-breaks on the raw pybind11 kernel and
+    # Inductor fails scheduling with KeyError: 'op5'. The hasattr guard keeps this
+    # idempotent across test re-imports that pop the module from sys.modules.
+    if not hasattr(torch.ops.vllm_omni, "sageattn3_blackwell"):
+
+        @torch.library.custom_op("vllm_omni::sageattn3_blackwell", mutates_args=())
+        def _sageattn3_blackwell_op(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            is_causal: bool,
+        ) -> torch.Tensor:
+            from sageattn3 import sageattn3_blackwell as _kernel
+
+            return _kernel(query, key, value, is_causal=is_causal)
+
+        @_sageattn3_blackwell_op.register_fake
+        def _(query, key, value, is_causal):
+            return torch.empty_like(query)
+
+
+    _sageattn3_blackwell_op = torch.ops.vllm_omni.sageattn3_blackwell
+
+
+def _xpu_v3_hybrid_kernel_call(
+    query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
+) -> torch.Tensor:
+    """Run the DeepKLOX Sage V3 Hybrid kernel using NHD BF16 tensors."""
+    assert sageattn_v3_hybrid is not None
+    return sageattn_v3_hybrid(query, key, value, tensor_layout="NHD")
+
+
+def _make_xpu_flash_fallback(**impl_kwargs) -> AttentionImpl | None:
+    """Build a FlashAttentionImpl to serve the calls the V3 kernel cannot take.
+
+    Flash attention rather than torch SDPA, because at these sequence lengths SDPA is
+    not a cheap safety net. Measured on CRI at Wan2.2 720p/81f self-attention
+    (S=75600, H=40, D=128, bf16): the V3 kernel is 0.252s per call and torch SDPA is
+    1.326s, 5.3x more. With SAGE_ATTN_FORCE_SDPA_BLOCKS=33,34,38,39 that put four
+    blocks at 5.3s against the other thirty-six at 9.1s combined -- a "quality
+    exception" for 10% of the blocks costing 37% of the pass. Flash also consumes the
+    NHD layout the model already has, so it skips the three contiguous transposes in
+    and one out that the SDPA path needs on ~774 MB tensors.
+
+    Delegating to FlashAttentionImpl rather than calling flash_attn_varlen_func here
+    keeps one implementation of the varlen plumbing, the attention-mask handling and
+    the FP8 K/V path, so the forced blocks compute what DIFFUSION_ATTENTION_BACKEND=
+    FLASH_ATTN would have computed for the same layer.
+
+    Returns None when this is not XPU, when SAGE_ATTN_FALLBACK=sdpa asked for the SDPA
+    path, or when no flash kernel is installed -- in which case the caller keeps using
+    torch SDPA.
+    """
+    if not current_omni_platform.is_xpu():
+        return None
+    # One gate for the whole knob: fallback() already treats None as "use SDPA", and
+    # both outcomes are counted separately (fallback_flash / fallback_sdpa), so the log
+    # proves which path a timing came from without trusting the env var was read.
+    if _SAGE_ATTN3_FALLBACK == "sdpa":
+        return None
+    try:
+        from vllm_omni.diffusion.attention.backends.utils.fa import HAS_FLASH_ATTN
+
+        if not HAS_FLASH_ATTN:
+            return None
+        from vllm_omni.diffusion.attention.backends.flash_attn import FlashAttentionImpl
+    except ImportError as error:
+        _xpu_warn_once(
+            "flash_import",
+            "SageAttention3 XPU could not import the flash-attention fallback "
+            f"({error}); non-kernel calls will use torch SDPA instead.",
+        )
+        return None
+    return FlashAttentionImpl(**impl_kwargs)
 
 
 class SageAttention3Backend(AttentionBackend):
@@ -53,6 +241,8 @@ class SageAttention3Backend(AttentionBackend):
 
     @staticmethod
     def get_supported_head_sizes() -> list[int]:
+        if current_omni_platform.is_xpu():
+            return [_V3_HYBRID_HEAD_SIZE]
         return [64, 128, 256]
 
     @staticmethod
@@ -80,6 +270,17 @@ class SageAttention3Impl(AttentionImpl):
         self.causal = causal
         self.softmax_scale = softmax_scale
         self.dropout = extra_impl_args.get("dropout_p", 0.0)
+        self.layer_idx = _try_extract_layer_index(prefix)
+        # Reference path for every call the V3 kernel declines. None => torch SDPA.
+        self._flash_fallback = _make_xpu_flash_fallback(
+            num_heads=num_heads,
+            head_size=head_size,
+            softmax_scale=softmax_scale,
+            causal=causal,
+            num_kv_heads=num_kv_heads,
+            prefix=prefix,
+            **extra_impl_args,
+        )
 
     def forward_cuda(
         self,
@@ -114,3 +315,120 @@ class SageAttention3Impl(AttentionImpl):
             output = _sageattn3_blackwell_op(query, key, value, self.causal)
 
         return output.transpose(1, 2).contiguous()
+
+    def forward_xpu(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_metadata: AttentionMetadata | None = None,
+    ) -> torch.Tensor:
+        global _xpu_v3_hybrid_available
+
+        orig_dtype = query.dtype
+        batch, seq_q, heads_q, head_dim = query.shape
+        heads_kv = key.shape[2]
+        seq_kv = key.shape[1]
+
+        if orig_dtype != torch.bfloat16:
+            query = query.to(torch.bfloat16)
+            key = key.to(torch.bfloat16)
+            value = value.to(torch.bfloat16)
+
+        def sdpa_fallback() -> torch.Tensor:
+            query_hnd = query.transpose(1, 2).contiguous()
+            key_hnd = key.transpose(1, 2).contiguous()
+            value_hnd = value.transpose(1, 2).contiguous()
+            output = F.scaled_dot_product_attention(
+                query_hnd,
+                key_hnd,
+                value_hnd,
+                is_causal=self.causal,
+                dropout_p=self.dropout,
+                scale=self.softmax_scale,
+                enable_gqa=heads_q != heads_kv,
+            )
+            return output.transpose(1, 2).contiguous().to(orig_dtype)
+
+        def fallback(kind: str) -> torch.Tensor:
+            """Serve a call the V3 kernel declined, preferring flash attention.
+
+            ``kind`` records *why* the kernel was skipped; the fallback_flash /
+            fallback_sdpa counters record which implementation actually ran, so a log
+            still distinguishes "SDPA because that is the only thing installed" from
+            "flash, as intended".
+            """
+            _sage_attn3_record(kind)
+            # dropout_p is 0 for every diffusion self-attention here; the varlen flash
+            # path takes no dropout argument, so honour a nonzero value via SDPA
+            # rather than silently discarding it.
+            if self._flash_fallback is not None and not self.dropout:
+                try:
+                    output = self._flash_fallback.forward_xpu(query, key, value, attn_metadata)
+                    _sage_attn3_record("fallback_flash")
+                    return output.to(orig_dtype)
+                except (ImportError, RuntimeError, ValueError) as error:
+                    # A capability or shape rejection is a property of this layer, not
+                    # of this call, so stop retrying instead of paying the exception
+                    # once per block per step.
+                    self._flash_fallback = None
+                    _xpu_warn_once(
+                        "flash_fallback",
+                        "SageAttention3 XPU flash-attention fallback failed "
+                        f"({type(error).__name__}: {error}); using torch SDPA instead.",
+                    )
+            _sage_attn3_record("fallback_sdpa")
+            return sdpa_fallback()
+
+        if seq_q != seq_kv:
+            return fallback("cross_sdpa")
+
+        if self.layer_idx is not None and self.layer_idx in _SAGE_ATTN3_FORCE_SDPA_BLOCKS:
+            return fallback("forced_sdpa")
+
+        if (
+            batch != _V3_HYBRID_BATCH
+            or heads_q != heads_kv
+            or head_dim != _V3_HYBRID_HEAD_SIZE
+            or self.causal
+        ):
+            _xpu_warn_once(
+                "contract",
+                "SageAttention3 XPU kernel requires batch=1, Hq==Hkv, "
+                f"head_dim={_V3_HYBRID_HEAD_SIZE} and non-causal attention; "
+                "falling back to flash attention.",
+            )
+            return fallback("sdpa_fallback")
+
+        if not _xpu_v3_hybrid_kernel_ready():
+            _xpu_warn_once(
+                "missing",
+                "SageAttention3 XPU kernel (deepklox) is not importable; "
+                "install deepklox with the Sage V3 Hybrid kernel enabled. "
+                "Falling back to flash attention.",
+            )
+            return fallback("sdpa_fallback")
+
+        try:
+            output = _xpu_v3_hybrid_kernel_call(query, key, value)
+        except RuntimeError as error:
+            if _xpu_v3_hybrid_unsupported(error):
+                _xpu_v3_hybrid_available = False
+                _xpu_warn_once(
+                    "unsupported",
+                    "DeepKLOX Sage V3 Hybrid requires CRI (Xe3P); "
+                    "falling back to flash attention.",
+                )
+                return fallback("sdpa_fallback")
+            raise
+
+        if _SAGE_ATTN3_DEBUG_CHECK_FINITE and not torch.isfinite(output).all():
+            _xpu_warn_once(
+                "nonfinite",
+                "SageAttention3 XPU kernel produced non-finite output; "
+                "re-running with flash attention for this call.",
+            )
+            return fallback("nonfinite_sdpa")
+
+        _sage_attn3_record("sage")
+        return output.to(orig_dtype)
