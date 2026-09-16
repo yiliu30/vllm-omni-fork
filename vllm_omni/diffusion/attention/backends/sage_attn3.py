@@ -17,7 +17,18 @@ from vllm_omni.platforms import current_omni_platform
 
 logger = init_logger(__name__)
 
+sageattn_v1_v2 = None
+
 if current_omni_platform.is_xpu():
+    try:
+        import deepklox
+
+        logger.warning_once(
+            "SAGE_ATTN_3 is using DeepKloX from %s",
+            getattr(deepklox, "__file__", "<unknown>"),
+        )
+    except ImportError:
+        deepklox = None
     try:
         from deepklox.sageattn_interface import sageattn_v3_hybrid
     except ImportError:
@@ -27,6 +38,10 @@ if current_omni_platform.is_xpu():
             "SAGE_ATTN_3 will fall back to flash attention. Install `deepklox` "
             "with SageAttention V3 support."
         )
+    try:
+        from deepklox.sageattn_interface import sageattn as sageattn_v1_v2
+    except ImportError:
+        sageattn_v1_v2 = None
 else:
     try:
         from sageattn3 import sageattn3_blackwell  # noqa: F401
@@ -38,25 +53,31 @@ else:
         raise ImportError
 
 _SAGE_ATTN3_FORCE_SDPA_BLOCKS = frozenset(
-    int(block)
-    for block in os.environ.get("SAGE_ATTN_FORCE_SDPA_BLOCKS", "").split(",")
-    if block.strip()
+    int(block) for block in os.environ.get("SAGE_ATTN_FORCE_SDPA_BLOCKS", "").split(",") if block.strip()
 )
 _SAGE_ATTN3_REPORT_FALLBACKS = os.environ.get("SAGE_ATTN_REPORT_FALLBACKS", "0") == "1"
 _SAGE_ATTN3_DEBUG_CHECK_FINITE = os.environ.get("SAGE_ATTN_DEBUG_CHECK_FINITE", "0") == "1"
-# Which implementation serves the calls the V3 kernel declines: "flash" (the default,
-# and the reason _make_xpu_flash_fallback exists) or "sdpa", which restores the original
-# torch.nn.functional.scaled_dot_product_attention path. Only "sdpa" is a behaviour
-# change; it exists to measure what the flash fallback buys, since the two differ on
-# every forced block, every cross-attention call and every contract rejection.
+_SAGE_ATTN_PRECISION = os.environ.get("SAGE_ATTN_PRECISION", "").strip().lower()
+# Which implementation serves the calls the V3 kernel declines: flash (the default),
+# SDPA, or a DeepKloX SageAttention V1/V2 kernel. The paths differ on every forced
+# block, every cross-attention call and every contract rejection.
 #
 # Deliberately fatal on an unrecognised value rather than defaulting to flash: the whole
 # point of the knob is attributing a timing to one of the two paths, and a typo that
 # silently produced flash numbers under an sdpa label would be worse than not starting.
 _SAGE_ATTN3_FALLBACK = os.environ.get("SAGE_ATTN_FALLBACK", "flash").strip().lower() or "flash"
-if _SAGE_ATTN3_FALLBACK not in ("flash", "sdpa"):
+_SAGE_ATTN3_FALLBACKS = ("flash", "sdpa", "sage_v1", "sage_v2")
+if _SAGE_ATTN3_FALLBACK not in _SAGE_ATTN3_FALLBACKS:
     raise ValueError(
-        f"SAGE_ATTN_FALLBACK must be 'flash' or 'sdpa', got {_SAGE_ATTN3_FALLBACK!r}"
+        f"SAGE_ATTN_FALLBACK must be one of {', '.join(_SAGE_ATTN3_FALLBACKS)}, got {_SAGE_ATTN3_FALLBACK!r}"
+    )
+_SAGE_ATTN3_FORCE_FALLBACK = (
+    os.environ.get("SAGE_ATTN_FORCE_FALLBACK", _SAGE_ATTN3_FALLBACK).strip().lower() or _SAGE_ATTN3_FALLBACK
+)
+if _SAGE_ATTN3_FORCE_FALLBACK not in _SAGE_ATTN3_FALLBACKS:
+    raise ValueError(
+        "SAGE_ATTN_FORCE_FALLBACK must be one of "
+        f"{', '.join(_SAGE_ATTN3_FALLBACKS)}, got {_SAGE_ATTN3_FORCE_FALLBACK!r}"
     )
 
 if current_omni_platform.is_xpu():
@@ -72,7 +93,7 @@ if current_omni_platform.is_xpu():
         # lengths costs 5.3x the sage kernel per call.
         logger.info(
             "SageAttention3 XPU forcing the %s fallback for transformer blocks: %s",
-            _SAGE_ATTN3_FALLBACK,
+            _SAGE_ATTN3_FORCE_FALLBACK,
             sorted(_SAGE_ATTN3_FORCE_SDPA_BLOCKS),
         )
 
@@ -92,6 +113,8 @@ _sage_attn3_call_counts = {
     # is flash attention rather than torch SDPA.
     "fallback_flash": 0,
     "fallback_sdpa": 0,
+    "fallback_sage_v1": 0,
+    "fallback_sage_v2": 0,
 }
 
 
@@ -120,7 +143,9 @@ def _sage_attn3_report_call_counts() -> None:
             f"sdpa_fallback={_sage_attn3_call_counts['sdpa_fallback']}, "
             f"nonfinite_sdpa={_sage_attn3_call_counts['nonfinite_sdpa']}, "
             f"fallback_flash={_sage_attn3_call_counts['fallback_flash']}, "
-            f"fallback_sdpa={_sage_attn3_call_counts['fallback_sdpa']}"
+            f"fallback_sdpa={_sage_attn3_call_counts['fallback_sdpa']}, "
+            f"fallback_sage_v1={_sage_attn3_call_counts['fallback_sage_v1']}, "
+            f"fallback_sage_v2={_sage_attn3_call_counts['fallback_sage_v2']}"
         )
 
 
@@ -180,16 +205,61 @@ if not current_omni_platform.is_xpu():
         def _(query, key, value, is_causal):
             return torch.empty_like(query)
 
-
     _sageattn3_blackwell_op = torch.ops.vllm_omni.sageattn3_blackwell
 
 
-def _xpu_v3_hybrid_kernel_call(
-    query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
-) -> torch.Tensor:
+def _xpu_v3_hybrid_kernel_call(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
     """Run the DeepKLOX Sage V3 Hybrid kernel using NHD BF16 tensors."""
     assert sageattn_v3_hybrid is not None
     return sageattn_v3_hybrid(query, key, value, tensor_layout="NHD")
+
+
+def _xpu_sage_fallback_kernel_call(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    *,
+    causal: bool,
+    softmax_scale: float,
+    mode: str,
+) -> torch.Tensor:
+    if sageattn_v1_v2 is None:
+        raise RuntimeError(f"SAGE_ATTN_FALLBACK={mode} requires DeepKloX built with SageAttention V1/V2 support.")
+    precision = _xpu_sage_fallback_precision(mode)
+    return sageattn_v1_v2(
+        query.contiguous(),
+        key.contiguous(),
+        value.contiguous(),
+        tensor_layout="NHD",
+        is_causal=causal,
+        sm_scale=softmax_scale,
+        precision=precision,
+    )
+
+
+def _xpu_sage_fallback_precision(mode: str) -> str:
+    defaults = {"sage_v1": "v1fp8", "sage_v2": "mxfp8"}
+    supported = {
+        "sage_v1": {"int8", "v1", "sagev1", "v1fp8", "v1fp8_fp8"},
+        "sage_v2": {"auto", "fp8", "mxfp8"},
+    }
+    if mode not in defaults:
+        raise ValueError(f"Unsupported Sage fallback mode: {mode!r}")
+
+    precision = _SAGE_ATTN_PRECISION or defaults[mode]
+    if precision not in supported[mode]:
+        raise ValueError(
+            f"SAGE_ATTN_PRECISION={precision!r} is incompatible with "
+            f"SAGE_ATTN_FALLBACK={mode}; expected one of "
+            f"{', '.join(sorted(supported[mode]))}"
+        )
+    return precision
+
+
+def _xpu_fallback_mode(kind: str) -> str:
+    if kind == "forced_sdpa":
+        return _SAGE_ATTN3_FORCE_FALLBACK
+    return _SAGE_ATTN3_FALLBACK
 
 
 def _make_xpu_flash_fallback(**impl_kwargs) -> AttentionImpl | None:
@@ -209,16 +279,16 @@ def _make_xpu_flash_fallback(**impl_kwargs) -> AttentionImpl | None:
     the FP8 K/V path, so the forced blocks compute what DIFFUSION_ATTENTION_BACKEND=
     FLASH_ATTN would have computed for the same layer.
 
-    Returns None when this is not XPU, when SAGE_ATTN_FALLBACK=sdpa asked for the SDPA
-    path, or when no flash kernel is installed -- in which case the caller keeps using
-    torch SDPA.
+    Returns None when this is not XPU, when a non-flash fallback was requested, or
+    when no flash kernel is installed -- in which case the caller selects the
+    configured alternative.
     """
     if not current_omni_platform.is_xpu():
         return None
     # One gate for the whole knob: fallback() already treats None as "use SDPA", and
     # both outcomes are counted separately (fallback_flash / fallback_sdpa), so the log
     # proves which path a timing came from without trusting the env var was read.
-    if _SAGE_ATTN3_FALLBACK == "sdpa":
+    if "flash" not in (_SAGE_ATTN3_FALLBACK, _SAGE_ATTN3_FORCE_FALLBACK):
         return None
     try:
         from vllm_omni.diffusion.attention.backends.utils.fa import HAS_FLASH_ATTN
@@ -271,7 +341,10 @@ class SageAttention3Impl(AttentionImpl):
         self.softmax_scale = softmax_scale
         self.dropout = extra_impl_args.get("dropout_p", 0.0)
         self.layer_idx = _try_extract_layer_index(prefix)
-        # Reference path for every call the V3 kernel declines. None => torch SDPA.
+        requested_fallbacks = {_SAGE_ATTN3_FALLBACK, _SAGE_ATTN3_FORCE_FALLBACK}
+        if any(mode.startswith("sage_") for mode in requested_fallbacks) and sageattn_v1_v2 is None:
+            raise RuntimeError("The configured Sage fallback requires DeepKloX built with SageAttention V1/V2 support.")
+        # Reference path for V3-declined calls when flash is configured.
         self._flash_fallback = _make_xpu_flash_fallback(
             num_heads=num_heads,
             head_size=head_size,
@@ -351,18 +424,28 @@ class SageAttention3Impl(AttentionImpl):
             return output.transpose(1, 2).contiguous().to(orig_dtype)
 
         def fallback(kind: str) -> torch.Tensor:
-            """Serve a call the V3 kernel declined, preferring flash attention.
+            """Serve a call the V3 kernel declined with the configured backend.
 
-            ``kind`` records *why* the kernel was skipped; the fallback_flash /
-            fallback_sdpa counters record which implementation actually ran, so a log
-            still distinguishes "SDPA because that is the only thing installed" from
-            "flash, as intended".
+            ``kind`` records why V3 was skipped; the fallback counters record which
+            implementation actually ran.
             """
             _sage_attn3_record(kind)
-            # dropout_p is 0 for every diffusion self-attention here; the varlen flash
-            # path takes no dropout argument, so honour a nonzero value via SDPA
-            # rather than silently discarding it.
-            if self._flash_fallback is not None and not self.dropout:
+            fallback_mode = _xpu_fallback_mode(kind)
+            if self.dropout:
+                _sage_attn3_record("fallback_sdpa")
+                return sdpa_fallback()
+            if fallback_mode.startswith("sage_"):
+                output = _xpu_sage_fallback_kernel_call(
+                    query,
+                    key,
+                    value,
+                    causal=self.causal,
+                    softmax_scale=self.softmax_scale,
+                    mode=fallback_mode,
+                )
+                _sage_attn3_record(f"fallback_{fallback_mode}")
+                return output.to(orig_dtype)
+            if fallback_mode == "flash" and self._flash_fallback is not None:
                 try:
                     output = self._flash_fallback.forward_xpu(query, key, value, attn_metadata)
                     _sage_attn3_record("fallback_flash")
@@ -386,12 +469,7 @@ class SageAttention3Impl(AttentionImpl):
         if self.layer_idx is not None and self.layer_idx in _SAGE_ATTN3_FORCE_SDPA_BLOCKS:
             return fallback("forced_sdpa")
 
-        if (
-            batch != _V3_HYBRID_BATCH
-            or heads_q != heads_kv
-            or head_dim != _V3_HYBRID_HEAD_SIZE
-            or self.causal
-        ):
+        if batch != _V3_HYBRID_BATCH or heads_q != heads_kv or head_dim != _V3_HYBRID_HEAD_SIZE or self.causal:
             _xpu_warn_once(
                 "contract",
                 "SageAttention3 XPU kernel requires batch=1, Hq==Hkv, "
@@ -416,8 +494,7 @@ class SageAttention3Impl(AttentionImpl):
                 _xpu_v3_hybrid_available = False
                 _xpu_warn_once(
                     "unsupported",
-                    "DeepKLOX Sage V3 Hybrid requires CRI (Xe3P); "
-                    "falling back to flash attention.",
+                    "DeepKLOX Sage V3 Hybrid requires CRI (Xe3P); falling back to flash attention.",
                 )
                 return fallback("sdpa_fallback")
             raise
@@ -425,8 +502,7 @@ class SageAttention3Impl(AttentionImpl):
         if _SAGE_ATTN3_DEBUG_CHECK_FINITE and not torch.isfinite(output).all():
             _xpu_warn_once(
                 "nonfinite",
-                "SageAttention3 XPU kernel produced non-finite output; "
-                "re-running with flash attention for this call.",
+                "SageAttention3 XPU kernel produced non-finite output; re-running with flash attention for this call.",
             )
             return fallback("nonfinite_sdpa")
 

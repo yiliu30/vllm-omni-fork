@@ -29,9 +29,12 @@ def load_sage_attn3_module(monkeypatch: pytest.MonkeyPatch, kernel_impl):
 
 
 def test_xpu_import_selects_deepklox_without_importing_cuda_sageattn3(monkeypatch: pytest.MonkeyPatch):
+    import vllm.logger as vllm_logger
+
     import vllm_omni.platforms as platforms
 
     calls = {}
+    logger = Mock()
 
     def fake_kernel(query, key, value, tensor_layout):
         calls["tensor_layout"] = tensor_layout
@@ -39,6 +42,7 @@ def test_xpu_import_selects_deepklox_without_importing_cuda_sageattn3(monkeypatc
 
     deepklox_module = types.ModuleType("deepklox")
     deepklox_module.__path__ = []
+    deepklox_module.__file__ = "/test/deepklox/__init__.py"
     interface_module = types.ModuleType("deepklox.sageattn_interface")
     interface_module.sageattn_v3_hybrid = fake_kernel
     original_import = builtins.__import__
@@ -49,6 +53,7 @@ def test_xpu_import_selects_deepklox_without_importing_cuda_sageattn3(monkeypatc
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(platforms.current_omni_platform, "is_xpu", lambda: True)
+    monkeypatch.setattr(vllm_logger, "init_logger", lambda _: logger)
     monkeypatch.setitem(sys.modules, "deepklox", deepklox_module)
     monkeypatch.setitem(sys.modules, "deepklox.sageattn_interface", interface_module)
     monkeypatch.setattr(builtins, "__import__", guarded_import)
@@ -59,10 +64,15 @@ def test_xpu_import_selects_deepklox_without_importing_cuda_sageattn3(monkeypatc
 
     assert backend_module._xpu_v3_hybrid_kernel_call(query, query, query) is query
     assert calls["tensor_layout"] == "NHD"
+    logger.warning_once.assert_called_once_with(
+        "SAGE_ATTN_3 is using DeepKloX from %s",
+        "/test/deepklox/__init__.py",
+    )
 
 
 def test_xpu_import_warns_when_deepklox_is_unavailable(monkeypatch: pytest.MonkeyPatch):
     import vllm.logger as vllm_logger
+
     import vllm_omni.platforms as platforms
 
     logger = Mock()
@@ -153,6 +163,73 @@ def test_sage_attn3_falls_back_to_sdpa_for_gqa(monkeypatch: pytest.MonkeyPatch):
     assert sdpa_calls["enable_gqa"] is True
     expected = (query.permute(0, 2, 1, 3) + 1).permute(0, 2, 1, 3)
     assert torch.allclose(output, expected)
+
+
+@pytest.mark.parametrize(
+    ("mode", "precision"),
+    [("sage_v1", "v1fp8"), ("sage_v2", "mxfp8")],
+)
+def test_xpu_sage_fallback_selects_deepklox_precision(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    precision: str,
+):
+    backend_module = load_sage_attn3_module(monkeypatch, lambda *args, **kwargs: None)
+    calls = {}
+
+    def fake_sageattn(query, key, value, **kwargs):
+        calls.update(kwargs)
+        return query
+
+    monkeypatch.setattr(backend_module, "sageattn_v1_v2", fake_sageattn)
+    query = torch.randn(1, 8, 4, 128)
+
+    output = backend_module._xpu_sage_fallback_kernel_call(
+        query,
+        query,
+        query,
+        causal=False,
+        softmax_scale=1.0 / 128**0.5,
+        mode=mode,
+    )
+
+    assert output is query
+    assert calls["tensor_layout"] == "NHD"
+    assert calls["is_causal"] is False
+    assert calls["precision"] == precision
+
+
+@pytest.mark.parametrize(
+    ("mode", "precision"),
+    [("sage_v1", "v1fp8_fp8"), ("sage_v2", "fp8")],
+)
+def test_xpu_sage_fallback_honors_precision_env(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    precision: str,
+):
+    backend_module = load_sage_attn3_module(monkeypatch, lambda *args, **kwargs: None)
+    monkeypatch.setattr(backend_module, "_SAGE_ATTN_PRECISION", precision)
+
+    assert backend_module._xpu_sage_fallback_precision(mode) == precision
+
+
+def test_xpu_sage_fallback_rejects_incompatible_precision(monkeypatch: pytest.MonkeyPatch):
+    backend_module = load_sage_attn3_module(monkeypatch, lambda *args, **kwargs: None)
+    monkeypatch.setattr(backend_module, "_SAGE_ATTN_PRECISION", "mxfp8")
+
+    with pytest.raises(ValueError, match="incompatible"):
+        backend_module._xpu_sage_fallback_precision("sage_v1")
+
+
+def test_xpu_forced_blocks_use_separate_fallback(monkeypatch: pytest.MonkeyPatch):
+    backend_module = load_sage_attn3_module(monkeypatch, lambda *args, **kwargs: None)
+    monkeypatch.setattr(backend_module, "_SAGE_ATTN3_FALLBACK", "flash")
+    monkeypatch.setattr(backend_module, "_SAGE_ATTN3_FORCE_FALLBACK", "sage_v1")
+
+    assert backend_module._xpu_fallback_mode("cross_sdpa") == "flash"
+    assert backend_module._xpu_fallback_mode("sdpa_fallback") == "flash"
+    assert backend_module._xpu_fallback_mode("forced_sdpa") == "sage_v1"
 
 
 @pytest.mark.skipif(not current_platform.is_cuda(), reason="sage_attn3 tests require CUDA platform")
