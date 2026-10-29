@@ -77,6 +77,12 @@ You can use `vllm bench serve --omni --help=all` to get descriptions of all para
                     'Allowed metric names are "ttft", "tpot", "itl", "ttfc", "tpoc", "icl", '
                     '"tpop", "e2el", "audio_ttfp", "audio_rtf", "audio_duration". '
 
+- `--goodput`
+  Specify request-level service objectives as space-separated `KEY:VALUE` pairs, with values in milliseconds.
+  Supported metrics are `ttft`, `tpot`, `e2el`, and `audio_ttfp`. When multiple objectives are supplied, a
+  request contributes to goodput only when it satisfies every objective, for example
+  `--goodput ttft:500 audio_ttfp:1000`.
+
 - `--print-stage`
 Print per-stage benchmark metrics for --omni serving when stage metrics are returned by the server. Disabled by default.
 
@@ -348,6 +354,18 @@ sample metadata records the effective `unit_ms`. Audio pacing uses a cumulative
 monotonic deadline so sending and frame processing do not add a full extra sleep
 to every append. The standalone `generate` command rejects `server_vad` combined
 with `--pace as-fast-as-possible`, which compresses turn and playback timing.
+When audio ends before the video, the runner pads it with silence to cover the
+clip before applying its existing turn-ending behavior. Each sampled frame goes
+into its audio interval `[start, end)`; frames on a boundary belong to the next
+interval. Up to two frames fit in an append. A higher density fails explicitly;
+reduce `--duplex-eval-fps` (or standalone `--fps`) instead of dropping frames.
+To replace standalone responses generated before this correction, use
+`generate --overwrite` or a new response directory.
+With `server_vad`, the full video continues after speech ends: silent audio and
+later frames are still sent before the extra VAD tail silence. Speech can end a
+turn before the clip finishes; later image items update the session context but
+do not themselves trigger another response. Input coverage therefore does not
+guarantee that every post-speech frame contributes to an answer.
 Settling is not an acknowledgement
 that all final input has been processed. Frames use the transport advertised by
 the server: native video frames or bounded image conversation items for Qwen3.
@@ -452,6 +470,18 @@ sessions, and judge errors. Partial coverage is marked `partial`; no evaluated
 sessions is `failed`, not a zero-error accuracy result. Scores are conditional on
 the evaluated subset, not an accuracy score for all attempted sessions. Warmups
 are never scored. Judge failures do not discard completed performance measurements.
+Judge replies must finish with `finish_reason="stop"` and contain the required
+scores: `temporal_score` (integer 0–3) and `is_relevant` (0 or 1) for temporal
+judging, `content_score` (finite number 0–3) for content judging, or `success_score`
+(0 or 1) for PR. A missing or null `finish_reason` fails evaluation even when the
+score JSON is valid: a parseable score does not establish that generation finished.
+Missing or invalid scores also fail evaluation; a valid zero from a completed
+reply still counts as an evaluated sample. Raw judge replies are saved beside each score in
+`<sample>.judge.jsonl`. Retrying evaluation archives an existing score as
+`<sample>.json.<unique-id>.previous`, which summaries exclude, and resets the
+reply trace. A failed retry leaves no active score; a new score is published only
+after all required judge calls succeed.
+
 The saved `omni_duplex_eval.published_with_unfinished_responses` counts published
 samples with non-empty `unfinished_response_ids` in their metadata. A nonzero count
 also emits a warning. These samples remain eligible for scoring using their collected
