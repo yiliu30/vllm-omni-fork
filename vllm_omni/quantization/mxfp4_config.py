@@ -245,6 +245,26 @@ class DiffusionMXFP4Config(QuantizationConfig):
                 if self.is_checkpoint_mxfp4_serialized:
                     raise NotImplementedError("Pre-quantized MXFP4 checkpoints are not yet supported on ROCm.")
                 return ROCmMxfp4OnlineLinearMethod(self)
+            if current_omni_platform.is_cuda():
+                # vLLM registers CUDA MXFP4 linear kernels (FlashInfer / Marlin /
+                # Humming / Emulation) and picks one via
+                # init_mxfp4_linear_kernel(); the diffusion-side (B, S, K)
+                # reshape lives in VllmMxfp4OnlineLinearMethod. Enabling the
+                # linear path on CUDA is therefore a policy change, not a new
+                # kernel. Pre-serialized checkpoints still belong to the INC
+                # path (see AutoRound note above).
+                if self.mxfp4_scale_alg != 0:
+                    raise NotImplementedError("MXFP4 UOS quantization is currently only supported on NPU (Ascend).")
+                if self.w4a8_fallback_steps or self.w4a8_fallback_layers:
+                    raise NotImplementedError(
+                        "MXFP4 W4A8 step/layer fallback is currently only supported on NPU (Ascend)."
+                    )
+                if self.is_checkpoint_mxfp4_serialized:
+                    raise NotImplementedError(
+                        "Pre-quantized MXFP4 checkpoints are not yet supported by the "
+                        "online mxfp4 method; use the AutoRound/INC path instead."
+                    )
+                return VllmMxfp4OnlineLinearMethod()
             if current_omni_platform.is_xpu():
                 if self.mxfp4_scale_alg != 0:
                     raise NotImplementedError("MXFP4 UOS quantization is currently only supported on NPU (Ascend).")
@@ -257,7 +277,7 @@ class DiffusionMXFP4Config(QuantizationConfig):
                 return VllmMxfp4OnlineLinearMethod()
             raise NotImplementedError(
                 "DiffusionMXFP4Config (W4A4 MXFP4) is currently only supported "
-                "on NPU (Ascend), ROCm (AMD, gfx950) and XPU (Intel) platforms."
+                "on NPU (Ascend), CUDA, ROCm (AMD, gfx950) and XPU (Intel) platforms."
             )
         return None
 
