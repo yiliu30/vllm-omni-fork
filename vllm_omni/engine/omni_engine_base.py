@@ -225,7 +225,7 @@ class OmniEngineBase:
         if self._omni_dp_size_local < 1:
             raise ValueError(f"--omni-dp-size-local must be >= 1, got {self._omni_dp_size_local}")
         self._omni_lb_policy: str = str(kwargs.get("omni_lb_policy") or "random")
-        self._omni_heartbeat_timeout: float = float(kwargs.get("omni_heartbeat_timeout") or 30.0)
+        self._omni_heartbeat_timeout: float = float(kwargs.get("omni_heartbeat_timeout") or 600.0)
         if self._omni_heartbeat_timeout <= 0:
             raise ValueError(f"--omni-heartbeat-timeout must be > 0, got {self._omni_heartbeat_timeout}")
         # Concurrent same-device stage init (admission + SH/EX phase locks).
